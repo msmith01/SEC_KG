@@ -1,0 +1,26 @@
+# Core NLP
+spacy>=3.7
+spacy-transformers>=1.3
+
+# Data models
+pydantic>=2.6
+
+# HTML parsing
+beautifulsoup4>=4.12
+lxml>=5.1
+
+# Graph DB
+neo4j>=5.19
+
+# Vector DB
+chromadb>=0.5
+
+# LLM clients
+ollama>=0.2
+anthropic>=0.28
+openai>=1.30
+
+# Utilities
+python-dotenv>=1.0
+pandas>=2.2
+tqdm>=4.66

@@ -1,0 +1,34 @@
+# Credentials
+.env
+
+# EDGAR raw data (large — re-downloadable from EDGAR)
+edgar_Filings/
+edgar_DailyMaster/
+edgar_DailyMasterCSVs/
+edgar_MasterIndex/
+edgar_RiskFactors/
+edgar_BusinDescr/
+edgar_MgmtDisc/
+
+# Python pipeline data (re-generatable from raw data)
+python/data/
+
+# Neo4j database files
+neo4j_data/
+neo4j_logs/
+
+# Runtime / logs
+logs/
+
+# Python env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude internals
+.openclaw/
+.claude/
+
+# OS
+.DS_Store
