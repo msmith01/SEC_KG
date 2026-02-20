@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## GitHub Workflow — IMPORTANT
+
+The repo is at **https://github.com/msmith01/SEC_KG** (private). Remote is `git@github.com:msmith01/SEC_KG.git`.
+
+**After any session that changes pipeline code, scripts, or config:**
+1. Update `REINSTALL.md` if the change affects how someone would rebuild from scratch (new deps, new scripts, new steps, changed commands, etc.)
+2. Commit all changed files with a clear message
+3. Push to GitHub
+
+```bash
+git add -p          # review and stage changes
+git commit -m "..."
+git push
+```
+
+Push frequently — at minimum once per session, ideally after each meaningful change.
+
 ## What This Project Is
 
 A pipeline that builds a **knowledge graph of SEC 10-K filings** stored in Neo4j. It has two layers:
