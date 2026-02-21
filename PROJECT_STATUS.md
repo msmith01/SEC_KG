@@ -1,6 +1,6 @@
 # SEC Knowledge Graph Project — Session History & Status
 
-*Generated: 2026-02-20. Covers all 7 Claude Code conversation sessions.*
+*Generated: 2026-02-21. Covers all 8 Claude Code conversation sessions.*
 
 ---
 
@@ -220,7 +220,7 @@ Neo4j restarted, glossary rebuilt from 3,748 preprocessed docs. KG population st
 ---
 
 ### Session 7 — 2026-02-20 Afternoon (7bb0fb3a)
-**Topic: Status check and this summary**
+**Topic: Status check and summary document created**
 
 | Year | Risk Factors | Business | MD&A | Notes |
 |------|-------------|----------|------|-------|
@@ -238,6 +238,41 @@ Neo4j restarted, glossary rebuilt from 3,748 preprocessed docs. KG population st
 Preprocessing: 4,024 risk_factors / 1,644 business / 1,514 MDA preprocessed.
 Glossary: running (`--rules-only --index-chroma`, 2h+ elapsed).
 KG population: 769/3,616 (21%) on business section; transient Neo4j timeout at doc 718, recovered.
+
+Overnight between Sessions 7 and 8, background jobs continued running unattended.
+
+---
+
+### Session 8 — 2026-02-21 (current)
+**Topic: Resume preprocessing + KG population; bugfixes; status review**
+
+**State at session start (overnight progress):**
+
+| Year | Risk Factors | Business | MD&A | Notes |
+|------|-------------|----------|------|-------|
+| 2015 | 1,555 | 1,675 | 1,643 | Complete |
+| 2016 | 1,131 | 1,194 | 1,174 | Complete |
+| 2017 | 561 | 600 | 597 | More collected |
+| 2018 | **365** | **410** | **410** | **Fixed — was missing** |
+| 2019 | **952** | **1,030** | **1,035** | **Filled — was 0** |
+| 2020 | 489 | 522 | 521 | Partially filled (was 0) |
+| 2021 | 154 | 162 | 169 | Partial (unchanged) |
+| 2022 | 250 | 254 | 262 | Partial (unchanged) |
+| 2023 | 190 | 193 | 211 | Partial (unchanged) |
+| 2024 | 427 | 431 | 444 | Partial (unchanged) |
+
+Preprocessing at session start: 6,074 risk_factors / 6,463 business / 6,209 MDA.
+KG checkpoint at session start: 2,463 docs.
+Disk: 34% used, 1.2 TB free.
+
+**Bug fixed: spaCy `max_length` error in `preprocessing/segmenter.py`**
+
+Some large 10-K sections have very long paragraphs (1.37M+ characters) that exceeded spaCy's default 1M-character limit. Fixed by setting `nlp.max_length = 3_000_000` after model load. Safe for sentence segmentation — the limit is a parser/NER memory guard, not needed for sentencizer output.
+
+**Jobs started this session:**
+- Neo4j (`neo4j-sec`) restarted
+- `python3 python/run_preprocessing.py` — running, catching up on new MDA + risk_factors files
+- `python3 python/run_kg_population.py --fast` — resumed from 2,463 docs; **16,530 total** documents in queue
 
 ---
 
@@ -275,36 +310,49 @@ spaCy `--fast` mode produces noise in Competitor and other ORG-type nodes. No au
 ChromaDB is populated with sentence-level vectors but no user-facing query interface (web UI, API endpoint, or CLI) has been built.
 
 ### Historical Data 1993–2014
-Master indexes for all years 1993–2024 are downloaded. Active collection has only targeted 2015–2024. The 1993–2014 years represent ~20 additional years of filings.
+Master indexes for all years 1993–2024 are downloaded. Active collection has only targeted 2015–2024. The 1993–2014 years represent ~20 additional years of filings (~60K+ additional section files).
 
 ### Automated Graph Monitoring / Alerting
 `monitor_graph.sh` was created and logs milestones, but no alerting (email, notification, dashboard) was built. The monitor just writes to `logs/graph_monitor.log`.
+
+### Graph Analytics Layer
+No analytics have been run on the completed graph. Ideas discussed:
+- **Sector-level risk aggregation** — cluster risk factors by company sector (SIC code) to find which risks are sector-wide vs company-specific
+- **Risk co-occurrence network** — edges between RiskDriver nodes that frequently appear together across filings
+- **Temporal trend analysis** — track rising/falling frequency of specific risk types year-over-year (e.g., "AI risk" emerging post-2022)
+- **Competitor network** — derive a market competition graph from Competitor nodes extracted across all filings
+
+### Query / RAG Layer
+The graph and ChromaDB vectors are built but there is no natural language interface over them. Ideas:
+- **Cypher query generator** — take a natural language question, generate a Cypher query, run it, summarise the result (RAG-over-graph)
+- **Hybrid retrieval** — combine ChromaDB vector search (for relevant sentences) with graph traversal (for structured relationships) to answer questions like *"What risks did semiconductor companies mention most in 2022?"*
+- **Analyst dashboard** — simple web UI (FastAPI + Jinja2 or Streamlit) that exposes search + graph queries without needing to write Cypher
+
+### `app/` Directory — In Progress
+A separate application layer is in development (not yet committed). Will be documented once complete.
 
 ---
 
 ## 3. Pipeline Tasks Outstanding
 
-### Actively Running (as of 2026-02-20 ~17:00)
+### Actively Running (as of 2026-02-21)
 
 | Task | Status | Log |
 |------|--------|-----|
-| R collection 2015–2024 (`run_all_years.sh`) | Running — 2017 in progress | `logs/collection_2015_2024.log` |
-| Preprocessing (cron, hourly) | Running, two instances active | `logs/cron_preprocessing.log` |
-| Glossary rebuild (`--rules-only --index-chroma`) | Running (2h+ elapsed) | — |
-| KG population (`--fast`, business section) | 769/3,616 (21%) | `logs/kg_population.log` |
+| Preprocessing | Running — catching up on 2018/2019/2020 new files | `logs/preprocessing_20260221.log` |
+| KG population (`--fast`) | Running — 2,463/16,530 resumed | `logs/kg_population_20260221.log` |
 
 ### Immediate Tasks
 
-- [ ] **Investigate 2018 gap** — no directory exists, possible skip in `run_all_years.sh`. Run: `bash run_parallel_collection.sh 2018 4`
-- [ ] **Complete 2019–2020 collection** — both years are empty; will be reached sequentially after 2017
-- [ ] **Final preprocessing pass** — after all R collection finishes, run one more `python3 python/run_preprocessing.py` to catch all new files
-- [ ] **Complete KG population** — currently 21% through business; risk_factors and MDA still queued; monitor for Neo4j timeouts
-- [ ] **Rebuild glossary post-preprocessing** — current glossary built from ~3,748 docs; final rebuild needed after ~117K docs are preprocessed
-- [ ] **Verify cron jobs ran correctly** — `run_daily_update.sh` (6am) and hourly preprocessing crons were installed in Session 6; confirm they fired
+- [ ] **Monitor preprocessing completion** — should finish all three sections; check for further spaCy errors on unusually large files
+- [ ] **Monitor KG population** — 16,530 docs at ~2–3 docs/sec = ~2 hrs; watch for Neo4j timeout at scale
+- [ ] **Investigate 2020–2024 gaps** — 2021–2024 still partial (154–489 RF files vs ~1000+ expected); determine if collection finished or stalled
+- [ ] **Run glossary rebuild** — current glossary is stale (built from ~3,748 docs); rebuild after preprocessing completes: `python3 python/run_glossary.py --rules-only --index-chroma`
+- [ ] **Verify cron jobs are firing** — check `logs/cron_daily.log` and `logs/cron_preprocessing.log` to confirm 6am daily and hourly crons ran
 
 ### Medium-Term Tasks
 
-- [ ] **LLM-mode KG re-population** — once GPU is stable under sustained load, re-run `python3 python/run_kg_population.py` (no `--fast`) to replace spaCy NER nodes with LLM-extracted entities
+- [ ] **LLM-mode KG re-population** — once GPU is stable, re-run without `--fast` to replace spaCy NER nodes with higher-quality LLM-extracted entities
 - [ ] **Extend collection to 1993–2014** — master indexes are ready; run `bash run_all_years.sh 1993 2014 4`
 - [ ] **Implement cross-year semantic linking** — add `PERSISTED_TO`, `EMERGED_IN`, `RESOLVED_IN` edges after multi-year graph is populated
 - [ ] **Cross-section linking** — connect entities that appear in multiple sections of the same filing
@@ -315,10 +363,11 @@ Master indexes for all years 1993–2024 are downloaded. Active collection has o
 ### Infrastructure / Quality Tasks
 
 - [ ] **Graph quality audit** — write Cypher queries to identify and flag NER noise (false-positive Competitor/ORG nodes)
-- [ ] **Build semantic search interface** — ChromaDB is populated but has no user-facing query UI or API
-- [ ] **Fix `.venv/` Python environment** — venv has no packages; either fix it or remove it and update `CLAUDE.md` to document `python3` as the correct binary
-- [ ] **Disk space monitoring** — was at 97% full after raw filings cleanup; needs ongoing monitoring as collection of 30+ years continues
-- [ ] **Neo4j stability under extended load** — timeout occurred at doc 718; consider increasing Neo4j heap/page-cache memory if it recurs
+- [ ] **Build semantic search / query interface** — ChromaDB is populated but has no user-facing query UI or API; consider FastAPI endpoint or Streamlit dashboard
+- [ ] **Fix `.venv/` Python environment** — venv has no packages; either fix it or remove it; update `CLAUDE.md` to document `python3` as the correct binary
+- [ ] **Disk space monitoring** — disk at 34% (1.2 TB free) as of 2026-02-21; needs ongoing monitoring as 1993–2014 collection begins
+- [ ] **Neo4j stability under extended load** — timeout occurred at doc 718 in Session 7; consider increasing Neo4j heap/page-cache memory if it recurs at scale
+- [ ] **`app/` development** — complete and commit the in-progress application layer
 
 ---
 
@@ -334,3 +383,4 @@ Master indexes for all years 1993–2024 are downloaded. Active collection has o
 | Multi-year graph | Single Neo4j DB with `FiscalYear` anchor nodes + `PRECEDES` chains | Community Edition limitation; scaffold enables temporal queries |
 | Filing cleanup | Delete raw `edgar_Filings/` after section extraction | 5.8 GB for 235 companies → ~4 TB projected for full corpus |
 | Parallelism | 4–6 workers per year | EDGAR rate limit ~10 req/sec; beyond 8 workers risks throttling |
+| spaCy max_length | Set to 3,000,000 after model load | Some 10-K sections have paragraphs >1M chars; safe for sentencizer |

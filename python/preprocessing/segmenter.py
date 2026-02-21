@@ -45,6 +45,11 @@ def _get_nlp():
                     file=sys.stderr,
                 )
                 _nlp = None
+        # Some 10-K sections have very long paragraphs; raise the limit so
+        # sentence segmentation doesn't fail.  NER/parser memory warnings
+        # don't apply here — we only use the sentencizer component.
+        if _nlp is not None:
+            _nlp.max_length = 3_000_000
     except ImportError:
         print("[segmenter] spaCy not installed. Using regex fallback.", file=sys.stderr)
 
