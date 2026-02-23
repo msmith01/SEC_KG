@@ -20,6 +20,11 @@ neo4j_logs/
 # Runtime / logs
 logs/
 
+# App runtime artifacts
+app/**/backend/data/*.db
+app/**/.env.local
+app/**/.env
+
 # Python env
 .venv/
 __pycache__/

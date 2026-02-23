@@ -15,7 +15,7 @@
 
 YEAR=${1:?Usage: $0 <year> [workers] [total]}
 WORKERS=${2:-4}
-TOTAL=${3:-7880}
+TOTAL=${3:-10021}
 CHUNK=$(( (TOTAL + WORKERS - 1) / WORKERS ))
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

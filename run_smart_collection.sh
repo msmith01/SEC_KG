@@ -62,7 +62,7 @@ for (( i=0; i<TOTAL_YEARS; i+=CONCURRENT_YEARS )); do
 
         # Launch WORKERS_PER_YEAR parallel workers for this year
         YEAR_PIDS=()
-        TOTAL_COMPANIES=5128
+        TOTAL_COMPANIES=10021
         CHUNK=$(( (TOTAL_COMPANIES + WORKERS_PER_YEAR - 1) / WORKERS_PER_YEAR ))
 
         for (( w=0; w<WORKERS_PER_YEAR; w++ )); do
