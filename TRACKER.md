@@ -1,6 +1,6 @@
 # SEC Knowledge Graph — Task Tracker
 
-Last updated: **2026-02-24 18:30**
+Last updated: **2026-02-24 22:50**
 
 ### Status key
 | Symbol | Meaning |
@@ -45,12 +45,12 @@ Last updated: **2026-02-24 18:30**
 | R-9 | Collection 2015–2024 (all ~10,021 companies) | 🔄 | 2026-02-20 | — | 2023 + 2024 still running; 2015–2022 appear complete |
 | R-10 | Collection 1993–2014 (historical) | 📋 | — | — | Master indexes ready; run after RAM frees up: `bash run_smart_collection.sh 1993 2014 4 6` |
 
-### Collection progress by year (as of 2026-02-21 ~18:00)
+### Collection progress by year (as of 2026-02-24 ~22:45)
 
 | Year | Risk Factors | Business | MD&A | Status |
 |------|-------------|----------|------|--------|
-| 2024 | 2,403 | 2,433 | 2,567 | 🔄 In progress |
-| 2023 | 1,812 | 1,814 | 1,934 | 🔄 In progress |
+| 2024 | 2,677 | 2,702 | 2,848 | 🔄 In progress — needs restart tomorrow |
+| 2023 | 2,087 | 2,098 | 2,221 | 🔄 In progress — needs restart tomorrow |
 | 2022 | 773 | 809 | 824 | ✅ Done |
 | 2021 | 632 | 677 | 682 | ✅ Done |
 | 2020 | 489 | 522 | 521 | ✅ Done |
@@ -100,9 +100,11 @@ Last updated: **2026-02-24 18:30**
 | O-6 | `kg_population/ner_extractor.py` — spaCy fast extractor | ✅ | 2026-02-19 | 2026-02-19 | No GPU needed; some NER noise (ORG false positives) |
 | O-7 | Checkpoint system (`.checkpoint.json`) | ✅ | 2026-02-19 | 2026-02-19 | Per-document; restarts skip already-done sections |
 | O-8 | Ollama retry / `keep_alive=-1` fix | ✅ | 2026-02-19 | 2026-02-19 | Exponential backoff; prevents VRAM eviction |
-| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Running as `nohup python3 -u python/run_kg_population.py --fast`; log: `logs/kg_population_fast.log`; ~55,600 docs, ~1s/doc, est. ~15h; checkpoint at `python/data/kg_export/.checkpoint.json` |
+| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Running throttled: `python3 run_kg_population.py --fast --delay 2` (PID 8839); log: `logs/kg_population_throttled.log`; ~3,961/55,600 checkpointed; ~8–23s/doc with delay; est. multi-day |
 | O-10 | **LLM-mode KG re-population** | ⚠️ | — | — | Blocked on GPU; will replace spaCy NER noise with higher-quality entities |
 | O-11 | **KG pipeline performance optimisation** | ✅ | 2026-02-24 | 2026-02-24 | 3-4x speedup: (1) `nlp.pipe(batch_size=64)` instead of per-sentence calls; (2) `write_document()` — single Neo4j session per doc; (3) edge `MERGE (a)-[r:TYPE]->(b)` without `filing_ref` in key — eliminates multigraph buildup; (4) checkpoint every 50 docs. Committed `2906cb5`. Graph wiped + restarted clean. |
+| O-12 | **KG OOM crash fix — lazy document loading** | ✅ | 2026-02-24 | 2026-02-24 | Old code loaded all 55,600 JSON docs into RAM at startup (~40 GB → OOM kill after ~4h). Fixed: one doc loaded per iteration, previous doc GC'd. Fast section_id scan reads only first 100 bytes per file (8x faster). Committed `7ff22f5`. |
+| O-13 | **KG throttle flag (`--delay`)** | ✅ | 2026-02-24 | 2026-02-24 | Added `--delay N` arg to `run_kg_population.py` — sleeps N seconds between docs; passes through to `pipeline.run_all()`. Current run uses `--delay 2`. |
 
 ---
 
@@ -141,12 +143,19 @@ Last updated: **2026-02-24 18:30**
 ## Suggested Build Order
 
 ```
-[Now — running]
-  R-9  → collect 2023 + 2024 (R workers, active; check logs/collection_<year>_worker_N.log)
-  P-7  → preprocess new files (cron, hourly; check logs/preprocessing.log)
-  O-9  → KG population --fast, all sections (PID 22434; check logs/kg_population_fast.log)
-         Monitor: tail -f logs/kg_population_fast.log
-         Progress: python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600')"
+[NOW — RUNNING OVERNIGHT]
+  O-9  → KG population --fast --delay 2 (PID 8839; check logs/kg_population_throttled.log)
+         Monitor: tail -f logs/kg_population_throttled.log
+         Progress: python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"
+         Neo4j: docker start neo4j-sec (if it isn't running)
+
+[TOMORROW — first things]
+  1. Restart R collection (stopped overnight):
+       bash run_parallel_collection.sh 2023 4
+       bash run_parallel_collection.sh 2024 4
+  2. Start glossary rebuild (failed to launch last session — log was 0 bytes):
+       python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
+  3. Check KG checkpoint progress and adjust --delay if CPU still high
 
 [While O-9 runs]
   G-5  → rebuild glossary from full corpus (can run in parallel — lightweight, CPU-only)
@@ -174,7 +183,7 @@ Last updated: **2026-02-24 18:30**
 
 | Log | What it covers |
 |-----|----------------|
-| `logs/kg_population_fast.log` | KG population (current run) |
+| `logs/kg_population_throttled.log` | KG population (current run — throttled `--delay 2`) |
 | `logs/collection_<year>_worker_N.log` | R data collection per year/worker |
 | `logs/preprocessing.log` | Hourly preprocessing cron |
 | `logs/daily_update.log` | Daily EDGAR collection cron |

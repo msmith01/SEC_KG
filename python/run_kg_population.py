@@ -35,6 +35,8 @@ def main():
                         help="Max documents to process (useful for testing)")
     parser.add_argument("--fast", action="store_true",
                         help="Use spaCy NER instead of LLM (no GPU/API needed)")
+    parser.add_argument("--delay", type=float, default=0.0,
+                        help="Seconds to sleep between documents (throttle CPU/GPU)")
     args = parser.parse_args()
 
     with KGPopulationPipeline(dry_run=args.dry_run, fast_mode=args.fast) as pipe:
@@ -44,7 +46,7 @@ def main():
             return
 
         section_type = SectionType(args.section) if args.section else None
-        results = pipe.run_all(section_type=section_type, limit=args.limit)
+        results = pipe.run_all(section_type=section_type, limit=args.limit, delay=args.delay)
 
     total_nodes = sum(r["nodes"] for r in results)
     total_edges = sum(r["edges"] for r in results)

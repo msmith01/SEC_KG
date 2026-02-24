@@ -666,14 +666,14 @@ header = {
 
 ---
 
-## 9. Current Status (as of 2026-02-24)
+## 9. Current Status (as of 2026-02-24 22:50)
 
 ### Data Collection
 
 | Year | Risk Factors | Business | MD&A | Status |
 |------|-------------|----------|------|--------|
-| 2024 | 2,403 | 2,433 | 2,567 | In progress |
-| 2023 | 1,812 | 1,814 | 1,934 | In progress |
+| 2024 | 2,677 | 2,702 | 2,848 | In progress — needs restart |
+| 2023 | 2,087 | 2,098 | 2,221 | In progress — needs restart |
 | 2022 | 773 | 809 | 824 | Done |
 | 2021 | 632 | 677 | 682 | Done |
 | 2020 | 489 | 522 | 521 | Done |
@@ -694,11 +694,14 @@ header = {
 ### Knowledge Graph
 
 - **Graph wiped and restarted clean on 2026-02-24** after discovering multigraph edge buildup (old schema used `filing_ref` in MERGE key, creating up to 12 parallel edges per node pair — made writes progressively slower)
-- **Now running:** `nohup python3 -u python/run_kg_population.py --fast > logs/kg_population_fast.log 2>&1 &`
-- **~55,600 docs to process**, ~1s/doc, estimated ~15 hours to completion
-- Monitor: `tail -f logs/kg_population_fast.log`
-- Check progress: `python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600')"`
+- **OOM crash fixed (2026-02-24):** Old loader read all 55,600 docs into RAM at startup (~40 GB → killed after ~4h). Now lazy-loads one doc at a time. Committed `7ff22f5`.
+- **Throttle flag added:** `--delay N` sleeps N seconds between docs to avoid CPU overload
+- **Running overnight:** `nohup python3 python/run_kg_population.py --fast --delay 2 > logs/kg_population_throttled.log 2>&1 &` (PID 8839)
+- **~3,961 / 55,600 docs done** (checkpoint as of 22:50 on 2026-02-24); ~8–23s/doc with delay
+- Monitor: `tail -f logs/kg_population_throttled.log`
+- Check progress: `python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"`
 - Checkpoint at `python/data/kg_export/.checkpoint.json`
+- **Neo4j runs in Docker:** `docker start neo4j-sec` if not running
 
 ### Pipeline Performance (after 2026-02-24 optimisation)
 
@@ -726,7 +729,7 @@ The KG population pipeline was profiled and optimised (commit `2906cb5`):
 
 | Log | Command to view |
 |-----|----------------|
-| KG population (current) | `tail -f logs/kg_population_fast.log` |
+| KG population (current) | `tail -f logs/kg_population_throttled.log` |
 | R collection per year | `tail -f logs/collection_<year>_worker_N.log` |
 | Preprocessing cron | `tail -f logs/preprocessing.log` |
 | Daily EDGAR update | `tail -f logs/daily_update.log` |
@@ -741,14 +744,26 @@ The KG population pipeline was profiled and optimised (commit `2906cb5`):
 
 ## 10. What To Do Next
 
-### Currently running (no action needed)
+### Running overnight (no action needed)
 
 ```bash
-# KG population — running in background, check progress with:
-tail -f logs/kg_population_fast.log
+# KG population — check progress:
+tail -f logs/kg_population_throttled.log
+python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600 docs')"
+```
 
-# Or check checkpoint count:
-python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600 docs')"
+### Tomorrow — first three things
+
+```bash
+# 1. Restart R collection (2023 + 2024 workers stopped)
+nohup bash run_parallel_collection.sh 2023 4 > logs/collection_2023_restart.log 2>&1 &
+nohup bash run_parallel_collection.sh 2024 4 > logs/collection_2024_restart.log 2>&1 &
+
+# 2. Start glossary rebuild (failed last session — log was 0 bytes, needs diagnosis)
+nohup python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
+
+# 3. Check KG checkpoint and adjust --delay if CPU still high
+python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600 docs')"
 ```
 
 ### While KG population runs — glossary rebuild (safe to run in parallel)

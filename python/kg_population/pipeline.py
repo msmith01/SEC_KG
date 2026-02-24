@@ -20,6 +20,7 @@ import json
 import re
 import sys
 import os
+import time
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -118,6 +119,7 @@ class KGPopulationPipeline:
         self,
         section_type: Optional[SectionType] = None,
         limit: Optional[int] = None,
+        delay: float = 0.0,
     ) -> list[dict]:
         """
         Process all preprocessed documents (optionally filtered by section type).
@@ -162,6 +164,9 @@ class KGPopulationPipeline:
                 )
             except Exception as e:
                 print(f"[kg] ERROR on {section_id}: {e}", file=sys.stderr)
+
+            if delay > 0:
+                time.sleep(delay)
 
         self._save_checkpoint(done)
         return results
