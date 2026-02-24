@@ -666,7 +666,7 @@ header = {
 
 ---
 
-## 9. Current Status (as of 2026-02-23)
+## 9. Current Status (as of 2026-02-24)
 
 ### Data Collection
 
@@ -688,62 +688,95 @@ header = {
 
 ### Preprocessing
 
-- **~18,746 documents preprocessed** (all of 2015–2022 + partial 2023/2024)
+- **~55,600 documents preprocessed** (~17,858 RF / 18,745 business / 18,997 MDA as of 2026-02-24)
 - Hourly cron job keeps pace with ongoing collection
-- No blockers — just waiting for collection to finish
 
 ### Knowledge Graph
 
-- **~4,526 nodes, ~6,291 edges** in Neo4j (~13% of corpus)
-- Built using spaCy NER fast mode
-- Paused — waiting for preprocessing to settle before resuming full population
+- **Graph wiped and restarted clean on 2026-02-24** after discovering multigraph edge buildup (old schema used `filing_ref` in MERGE key, creating up to 12 parallel edges per node pair — made writes progressively slower)
+- **Now running:** `nohup python3 -u python/run_kg_population.py --fast > logs/kg_population_fast.log 2>&1 &`
+- **~55,600 docs to process**, ~1s/doc, estimated ~15 hours to completion
+- Monitor: `tail -f logs/kg_population_fast.log`
+- Check progress: `python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600')"`
 - Checkpoint at `python/data/kg_export/.checkpoint.json`
+
+### Pipeline Performance (after 2026-02-24 optimisation)
+
+The KG population pipeline was profiled and optimised (commit `2906cb5`):
+
+| Fix | Before | After |
+|-----|--------|-------|
+| spaCy: `nlp.pipe(batch_size=64)` vs per-sentence calls | — | ~5x NER speedup |
+| Neo4j: single `write_document()` session per doc | ~8 round-trips/doc | 1 session/doc |
+| Edge MERGE: `(a)-[r:TYPE]->(b)` without `filing_ref` key | multigraph, growing O(n) | one edge per pair |
+| Checkpoint: every 50 docs instead of every doc | — | minor I/O reduction |
+| **Total** | **3–4s/doc** | **~1s/doc** |
 
 ### Glossary
 
 - **65 KB** glossary from ~3,748 docs (rules-only, stale)
-- Full corpus rebuild queued after collection settles
+- Full corpus rebuild queued: `python3 python/run_glossary.py --rules-only --index-chroma`
 
 ### App Layer
 
 - **10k-monitor:** Built and functional (Next.js + FastAPI + SQLite)
 - **ghostlink:** Architecture planned, implementation not started
 
+### Log Locations
+
+| Log | Command to view |
+|-----|----------------|
+| KG population (current) | `tail -f logs/kg_population_fast.log` |
+| R collection per year | `tail -f logs/collection_<year>_worker_N.log` |
+| Preprocessing cron | `tail -f logs/preprocessing.log` |
+| Daily EDGAR update | `tail -f logs/daily_update.log` |
+
 ### Known Issues
 
 1. **Python venv broken** — deps are in user Python (`~/.local/lib/python3.13/`) not `.venv/`. Everything still works; just use `python3` directly.
 2. **RTX 5090 GPU instability** — GSP firmware crash on CUDA ops. Fix applied (`NVreg_EnableGpuFirmware=0`). LLM extraction (`kg_population` non-fast mode) blocked until stable.
-3. **Neo4j sparse** — 13% of corpus. Not a blocker for app layer (reads preprocessed JSON directly).
+3. **spaCy NER noise** — `--fast` mode produces false-positive Competitor nodes (e.g. "Board of Directors", "LLP", "Internal Audit" tagged as ORG). Addressed in E-4 (graph quality audit).
 
 ---
 
 ## 10. What To Do Next
 
-### Immediate (when 2023/2024 collection completes)
+### Currently running (no action needed)
 
 ```bash
-# 1. Let preprocessing catch up (already running via cron, or run manually)
-python python/run_preprocessing.py
+# KG population — running in background, check progress with:
+tail -f logs/kg_population_fast.log
 
-# 2. Resume KG population (spaCy fast mode, full corpus)
-python python/run_kg_population.py --fast --section risk_factors
-python python/run_kg_population.py --fast --section business
-python python/run_kg_population.py --fast --section mda
-
-# 3. Rebuild glossary from full corpus
-python python/run_glossary.py --rules-only --index-chroma
+# Or check checkpoint count:
+python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600 docs')"
 ```
 
-### Medium term
+### While KG population runs — glossary rebuild (safe to run in parallel)
+
+```bash
+# Fast, CPU-only, ~30 min on full corpus
+python3 python/run_glossary.py --rules-only --index-chroma
+```
+
+### After 2023/2024 collection completes
 
 ```bash
 # Collect historical years (1993–2014)
 bash run_smart_collection.sh 1993 2014 4 6
+```
 
-# Once LLM is stable: re-populate graph with higher quality extraction
-# (delete checkpoint first to force full re-run)
+### After KG population completes (~15h from 2026-02-24)
+
+```bash
+# 1. Graph quality audit — remove NER false positives (E-4)
+#    Run Cypher in Neo4j browser to flag/delete junk Competitor nodes
+
+# 2. Cross-year semantic linking (E-1) — biggest value-add
+#    PERSISTED_TO / EMERGED_IN / RESOLVED_IN edges between RiskFactor nodes
+
+# 3. Re-run with LLM once GPU is stable (higher quality extraction)
 rm python/data/kg_export/.checkpoint.json
-python python/run_kg_population.py --section risk_factors
+python3 python/run_kg_population.py --section risk_factors
 ```
 
 ### Graph enrichment (biggest value-add)
@@ -928,12 +961,53 @@ python3 -m pip install -r python/requirements.txt
 
 ### KG population running slowly
 
-Use `--fast` mode (spaCy NER, no LLM):
+The pipeline was profiled on 2026-02-24. Bottlenecks found and fixed (commit `2906cb5`):
+
+1. **spaCy per-sentence calls** — fixed by `nlp.pipe(batch_size=64)` in `ner_extractor.py`
+2. **Neo4j session per write** — fixed by `write_document()` single-session method in `neo4j_schema.py`
+3. **Edge MERGE with `filing_ref` in key** — created multigraph; fixed by removing from MERGE pattern
+
+If still slow, profile with:
 ```bash
-python python/run_kg_population.py --fast
+python3 -c "
+import time, sys
+sys.path.insert(0, 'python')
+from models.schemas import SectionDocument
+from kg_population.ner_extractor import NERExtractor
+import config
+files = sorted((config.PREPROCESSED_DIR / 'risk_factors').glob('*.json'))[:5]
+docs = [SectionDocument.model_validate_json(f.read_text()) for f in files]
+ext = NERExtractor()
+t = time.time()
+for d in docs: ext.extract(d)
+print(f'NER only: {(time.time()-t)/5:.2f}s/doc')
+"
 ```
 
-For LLM mode, reduce load on Ollama by processing one section at a time and checking `logs/`.
+Expected: ~0.5-1s/doc NER, ~0.1-0.3s/doc Neo4j write on a clean graph.
+
+If the graph has grown large and MERGE is slowing down again, check for edge count per node:
+```cypher
+MATCH (c:Company)-[r:COMPETES_WITH]->(comp)
+WITH c, comp, count(r) AS cnt WHERE cnt > 1
+RETURN count(*) AS problem_pairs
+```
+If `problem_pairs > 0`, the graph has accumulated parallel edges. Wipe and restart:
+```bash
+python3 -c "
+import sys; sys.path.insert(0,'python')
+from ontology.neo4j_schema import Neo4jGraph
+g = Neo4jGraph()
+while True:
+    r = g.query('MATCH (n) WITH n LIMIT 10000 DETACH DELETE n RETURN count(n) AS d')
+    if r[0]['d'] == 0: break
+    print('deleted', r[0]['d'])
+g.close()
+"
+python3 python/run_kg_population.py --apply-schema
+echo '[]' > python/data/kg_export/.checkpoint.json
+nohup python3 -u python/run_kg_population.py --fast > logs/kg_population_fast.log 2>&1 &
+```
 
 ### R collection stalling
 
@@ -957,4 +1031,4 @@ python python/run_kg_population.py --fast --section risk_factors
 
 ---
 
-*Last updated: 2026-02-23. Update this file whenever the project structure, commands, or status materially change. Push to GitHub after every session.*
+*Last updated: 2026-02-24. Update this file whenever the project structure, commands, or status materially change. Push to GitHub after every session.*

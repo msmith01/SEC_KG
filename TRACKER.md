@@ -1,6 +1,6 @@
 # SEC Knowledge Graph — Task Tracker
 
-Last updated: **2026-02-21 18:15**
+Last updated: **2026-02-24 18:30**
 
 ### Status key
 | Symbol | Meaning |
@@ -26,6 +26,7 @@ Last updated: **2026-02-21 18:15**
 | I-7 | Python venv broken — all deps in user Python | ⚠️ | 2026-02-20 | — | `.venv/` exists but empty; use `python3` directly (`~/.local/lib/python3.13/`) |
 | I-8 | CLAUDE.md project instructions | ✅ | 2026-02-20 | 2026-02-20 | Documents all commands, architecture, data flow |
 | I-9 | Fix company count in collection scripts (5128 → 10021) | ✅ | 2026-02-21 | 2026-02-21 | Fixed in `run_smart_collection.sh` and `run_parallel_collection.sh` |
+| I-10 | Graph visualisation (networkx/matplotlib) | ✅ | 2026-02-24 | 2026-02-24 | Sample subgraph render: FiscalYear chain, filings, companies, competitors, geo markets. Generated ad-hoc via Python; saved to `/tmp/sec_kg_viz.png` |
 
 ---
 
@@ -73,7 +74,7 @@ Last updated: **2026-02-21 18:15**
 | P-3 | `preprocessing/tagger.py` — forward-looking + coreference tags | ✅ | 2026-02-19 | 2026-02-19 | |
 | P-4 | `preprocessing/pipeline.py` — R `.txt` → `SectionDocument` JSON | ✅ | 2026-02-19 | 2026-02-19 | Walks year subdirs; parses CIK/ticker/date header |
 | P-5 | Fix spaCy `max_length` crash on large filings | ✅ | 2026-02-21 | 2026-02-21 | Some paragraphs exceed 1M chars; raised limit to 3M |
-| P-6 | Preprocess all currently collected files | 🔄 | 2026-02-20 | — | ~10,603 RF / 11,012 business / 11,305 MDA preprocessed; cron keeping pace with collection |
+| P-6 | Preprocess all currently collected files | 🔄 | 2026-02-20 | — | ~17,858 RF / 18,745 business / 18,997 MDA preprocessed (55,600 total as of 2026-02-24); cron keeping pace |
 | P-7 | Continuous preprocessing of new files (cron) | 🔄 | 2026-02-20 | — | Hourly cron; runs automatically as collection adds files |
 
 ### Glossary
@@ -93,14 +94,15 @@ Last updated: **2026-02-21 18:15**
 |---|------|--------|---------|-----------|-------|
 | O-1 | `ontology/nodes.py` — 18 typed node classes | ✅ | 2026-02-19 | 2026-02-19 | Company, Filing, Section, RiskFactor, RiskDriver, Competitor, Product, etc. |
 | O-2 | `ontology/relations.py` — 25 relation types | ✅ | 2026-02-19 | 2026-02-19 | |
-| O-3 | `ontology/neo4j_schema.py` — constraints + indexes | ✅ | 2026-02-19 | 2026-02-19 | 18 uniqueness constraints + 7 indexes applied |
+| O-3 | `ontology/neo4j_schema.py` — constraints + indexes | ✅ | 2026-02-19 | 2026-02-19 | 19 uniqueness constraints + 8 indexes applied |
 | O-4 | `FiscalYear` anchor nodes + `PRECEDES` chain | ✅ | 2026-02-20 | 2026-02-20 | Multi-year graph scaffold; `FILED_IN` edges per filing |
 | O-5 | `kg_population/extractor.py` — LLM entity/relation extractor | ✅ | 2026-02-19 | 2026-02-19 | Section-tailored prompts; unreliable due to GPU crashes |
 | O-6 | `kg_population/ner_extractor.py` — spaCy fast extractor | ✅ | 2026-02-19 | 2026-02-19 | No GPU needed; some NER noise (ORG false positives) |
 | O-7 | Checkpoint system (`.checkpoint.json`) | ✅ | 2026-02-19 | 2026-02-19 | Per-document; restarts skip already-done sections |
 | O-8 | Ollama retry / `keep_alive=-1` fix | ✅ | 2026-02-19 | 2026-02-19 | Exponential backoff; prevents VRAM eviction |
-| O-9 | **KG population (fast/spaCy) — full corpus** | ⏸ | 2026-02-21 | — | 560 docs checkpointed after rebuild; not currently running — resume after preprocessing settles |
+| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Running as `nohup python3 -u python/run_kg_population.py --fast`; log: `logs/kg_population_fast.log`; ~55,600 docs, ~1s/doc, est. ~15h; checkpoint at `python/data/kg_export/.checkpoint.json` |
 | O-10 | **LLM-mode KG re-population** | ⚠️ | — | — | Blocked on GPU; will replace spaCy NER noise with higher-quality entities |
+| O-11 | **KG pipeline performance optimisation** | ✅ | 2026-02-24 | 2026-02-24 | 3-4x speedup: (1) `nlp.pipe(batch_size=64)` instead of per-sentence calls; (2) `write_document()` — single Neo4j session per doc; (3) edge `MERGE (a)-[r:TYPE]->(b)` without `filing_ref` in key — eliminates multigraph buildup; (4) checkpoint every 50 docs. Committed `2906cb5`. Graph wiped + restarted clean. |
 
 ---
 
@@ -140,18 +142,22 @@ Last updated: **2026-02-21 18:15**
 
 ```
 [Now — running]
-  R-9  → collect 2023 + 2024 (2 workers, active)
-  P-7  → preprocess new files (cron, hourly)
+  R-9  → collect 2023 + 2024 (R workers, active; check logs/collection_<year>_worker_N.log)
+  P-7  → preprocess new files (cron, hourly; check logs/preprocessing.log)
+  O-9  → KG population --fast, all sections (PID 22434; check logs/kg_population_fast.log)
+         Monitor: tail -f logs/kg_population_fast.log
+         Progress: python3 -c "import json; cp=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(cp), '/ ~55600')"
 
-[Next — when preprocessing settles + RAM frees]
-  O-9  → resume KG population --fast (spaCy, no GPU)
-  G-5  → rebuild glossary from full corpus (rules-only, lightweight)
+[While O-9 runs]
+  G-5  → rebuild glossary from full corpus (can run in parallel — lightweight, CPU-only)
+         python3 python/run_glossary.py --rules-only --index-chroma
 
-[After 2023/2024 collection completes]
+[After 2023/2024 collection + O-9 completes]
   R-10 → start 1993-2014 historical collection
+         bash run_smart_collection.sh 1993 2014 4 6
 
 [After full corpus in graph]
-  E-4  → graph quality audit / NER noise cleanup
+  E-4  → graph quality audit / NER noise cleanup  ← lots of false-positive Competitor nodes
   E-1  → cross-year semantic linking  ← biggest graph value-add
   E-2  → cross-section linking
 
@@ -163,3 +169,12 @@ Last updated: **2026-02-21 18:15**
   Q-1  → RAG query interface
   Q-3  → analyst dashboard
 ```
+
+## Log Locations
+
+| Log | What it covers |
+|-----|----------------|
+| `logs/kg_population_fast.log` | KG population (current run) |
+| `logs/collection_<year>_worker_N.log` | R data collection per year/worker |
+| `logs/preprocessing.log` | Hourly preprocessing cron |
+| `logs/daily_update.log` | Daily EDGAR collection cron |
