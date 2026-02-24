@@ -77,9 +77,10 @@ class NERExtractor:
         seen_geos: set[str]  = set()
         seen_metrics: set[str] = set()
 
-        for sent in doc.sentences:
-            spacy_doc = nlp(sent.text)
-
+        sentences = doc.sentences
+        for sent, spacy_doc in zip(sentences, nlp.pipe(
+            (s.text for s in sentences), batch_size=64
+        )):
             for ent in spacy_doc.ents:
                 label = ent.label_
                 text  = ent.text.strip()

@@ -86,40 +86,47 @@ class GraphWriter:
         self._g.upsert_edges(edges)
         return len(edges)
 
-    def write(self, nodes: list, edges: list[Edge]) -> tuple[int, int]:
-        """Write both nodes and edges. Returns (nodes_written, edges_written)."""
-        n = self.write_nodes(nodes)
-        e = self.write_edges(edges)
-        return n, e
-
-    def ensure_fiscal_year_chain(self, fiscal_year: int) -> None:
+    def write_document(
+        self,
+        nodes: list,
+        edges: list[Edge],
+        accession_number: str,
+        fiscal_year: int,
+    ) -> tuple[int, int]:
         """
-        MERGE a FiscalYear node for the given year and wire up the PRECEDES
-        chain to the previous year (if it exists).  Idempotent — safe to call
-        repeatedly.
+        Write nodes, edges, and FiscalYear wiring for one document in a single
+        Neo4j session.  Returns (nodes_written, edges_written).
         """
-        fy_id   = FiscalYear.make_id(fiscal_year)
-        prev_id = FiscalYear.make_id(fiscal_year - 1)
+        from collections import defaultdict
 
-        # Upsert this year's node
-        self._g.upsert_node("FiscalYear", {"node_id": fy_id, "year": fiscal_year})
+        # Group nodes by label
+        nodes_by_label: dict[str, list] = defaultdict(list)
+        for node in nodes:
+            label = _LABEL_MAP.get(type(node))
+            if label is None:
+                print(f"[writer] Unknown node type: {type(node)}", file=sys.stderr)
+                continue
+            props = node_to_props(node)
+            nodes_by_label[label].append(
+                {k: v for k, v in props.items() if v is not None}
+            )
 
-        # Link previous year → this year (only if previous year node exists)
-        self._g.query(
-            "MATCH (prev:FiscalYear {node_id: $prev_id}) "
-            "MATCH (curr:FiscalYear {node_id: $curr_id}) "
-            "MERGE (prev)-[:PRECEDES]->(curr)",
-            prev_id=prev_id,
-            curr_id=fy_id,
-        )
+        # Group edges by relation type
+        edges_by_type: dict[str, list] = defaultdict(list)
+        for edge in edges:
+            edges_by_type[edge.relation_type.value].append({
+                "subject_id":  edge.subject_id,
+                "object_id":   edge.object_id,
+                "filing_ref":  edge.filing_ref,
+                "as_of_year":  edge.as_of_year,
+                "confidence":  edge.provenance.confidence,
+                "sentence_id": edge.provenance.sentence_id,
+                "weight":      edge.weight,
+            })
 
-    def link_filing_to_fiscal_year(self, accession_number: str, fiscal_year: int) -> None:
-        """Create FILED_IN edge from a Filing to its FiscalYear node."""
-        fy_id = FiscalYear.make_id(fiscal_year)
-        self._g.query(
-            "MATCH (f:Filing {node_id: $acc}) "
-            "MATCH (fy:FiscalYear {node_id: $fy_id}) "
-            "MERGE (f)-[:FILED_IN]->(fy)",
-            acc=accession_number,
-            fy_id=fy_id,
+        return self._g.write_document(
+            dict(nodes_by_label),
+            dict(edges_by_type),
+            accession_number,
+            fiscal_year,
         )

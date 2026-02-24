@@ -154,9 +154,10 @@ class Neo4jGraph:
         cypher = (
             f"MATCH (a {{node_id: $subject_id}}) "
             f"MATCH (b {{node_id: $object_id}}) "
-            f"MERGE (a)-[r:{edge.relation_type.value} {{filing_ref: $filing_ref}}]->(b) "
+            f"MERGE (a)-[r:{edge.relation_type.value}]->(b) "
             f"SET r.as_of_year   = $as_of_year, "
             f"    r.confidence   = $confidence, "
+            f"    r.filing_ref   = $filing_ref, "
             f"    r.sentence_id  = $sentence_id, "
             f"    r.weight       = $weight"
         )
@@ -173,9 +174,105 @@ class Neo4jGraph:
             )
 
     def upsert_edges(self, edges: list[Edge]) -> None:
-        """Batch edge upsert."""
+        """Batch edge upsert — groups by relation type and uses UNWIND."""
+        from collections import defaultdict
+        by_type: dict[str, list[Edge]] = defaultdict(list)
         for edge in edges:
-            self.upsert_edge(edge)
+            by_type[edge.relation_type.value].append(edge)
+
+        with self._driver.session(database=self._database) as session:
+            for rel_type, rel_edges in by_type.items():
+                cypher = (
+                    f"UNWIND $batch AS row "
+                    f"MATCH (a {{node_id: row.subject_id}}) "
+                    f"MATCH (b {{node_id: row.object_id}}) "
+                    f"MERGE (a)-[r:{rel_type}]->(b) "
+                    f"SET r.as_of_year  = row.as_of_year, "
+                    f"    r.confidence  = row.confidence, "
+                    f"    r.filing_ref  = row.filing_ref, "
+                    f"    r.sentence_id = row.sentence_id, "
+                    f"    r.weight      = row.weight"
+                )
+                batch = [
+                    {
+                        "subject_id":  e.subject_id,
+                        "object_id":   e.object_id,
+                        "filing_ref":  e.filing_ref,
+                        "as_of_year":  e.as_of_year,
+                        "confidence":  e.provenance.confidence,
+                        "sentence_id": e.provenance.sentence_id,
+                        "weight":      e.weight,
+                    }
+                    for e in rel_edges
+                ]
+                session.run(cypher, batch=batch)
+
+    def write_document(
+        self,
+        nodes_by_label: dict[str, list[dict[str, Any]]],
+        edges_by_type:  dict[str, list[dict[str, Any]]],
+        accession_number: str,
+        fiscal_year: int,
+    ) -> tuple[int, int]:
+        """
+        Write all nodes, edges, and FiscalYear wiring for one document in a
+        single session — eliminates per-call session overhead.
+        Returns (nodes_written, edges_written).
+        """
+        fy_id   = f"fy_{fiscal_year}"
+        prev_id = f"fy_{fiscal_year - 1}"
+        n_nodes = sum(len(v) for v in nodes_by_label.values())
+        n_edges = sum(len(v) for v in edges_by_type.values())
+
+        with self._driver.session(database=self._database) as session:
+            # Nodes — one UNWIND per label
+            for label, batch in nodes_by_label.items():
+                session.run(
+                    f"UNWIND $batch AS row "
+                    f"MERGE (n:{label} {{node_id: row.node_id}}) "
+                    f"SET n += row",
+                    batch=batch,
+                )
+
+            # Edges — one UNWIND per relation type
+            # MERGE on (a, rel_type, b) only — no filing_ref in merge key so
+            # the graph has at most one edge per pair (cleaner for analytics).
+            # as_of_year / confidence are updated on each encounter.
+            for rel_type, batch in edges_by_type.items():
+                session.run(
+                    f"UNWIND $batch AS row "
+                    f"MATCH (a {{node_id: row.subject_id}}) "
+                    f"MATCH (b {{node_id: row.object_id}}) "
+                    f"MERGE (a)-[r:{rel_type}]->(b) "
+                    f"SET r.as_of_year  = row.as_of_year, "
+                    f"    r.confidence  = row.confidence, "
+                    f"    r.filing_ref  = row.filing_ref, "
+                    f"    r.sentence_id = row.sentence_id, "
+                    f"    r.weight      = row.weight",
+                    batch=batch,
+                )
+
+            # FiscalYear node + PRECEDES chain
+            session.run(
+                "MERGE (n:FiscalYear {node_id: $fy_id}) SET n.year = $year",
+                fy_id=fy_id, year=fiscal_year,
+            )
+            session.run(
+                "MATCH (prev:FiscalYear {node_id: $prev_id}) "
+                "MATCH (curr:FiscalYear {node_id: $curr_id}) "
+                "MERGE (prev)-[:PRECEDES]->(curr)",
+                prev_id=prev_id, curr_id=fy_id,
+            )
+
+            # Filing → FiscalYear edge
+            session.run(
+                "MATCH (f:Filing {node_id: $acc}) "
+                "MATCH (fy:FiscalYear {node_id: $fy_id}) "
+                "MERGE (f)-[:FILED_IN]->(fy)",
+                acc=accession_number, fy_id=fy_id,
+            )
+
+        return n_nodes, n_edges
 
     # ── Queries ───────────────────────────────────────────────────────────────
 

@@ -92,12 +92,10 @@ class KGPopulationPipeline:
 
         # 3. Write
         if not self._dry_run and self._writer:
-            n_nodes, n_edges = self._writer.write(nodes, edges)
-            # Ensure FiscalYear node exists and Filing is linked to it
-            fiscal_year = doc.metadata.fiscal_year
-            self._writer.ensure_fiscal_year_chain(fiscal_year)
-            self._writer.link_filing_to_fiscal_year(
-                doc.metadata.accession_number, fiscal_year
+            n_nodes, n_edges = self._writer.write_document(
+                nodes, edges,
+                doc.metadata.accession_number,
+                doc.metadata.fiscal_year,
             )
         else:
             n_nodes = len(nodes)
@@ -140,12 +138,13 @@ class KGPopulationPipeline:
         results = []
         iterable = tqdm(pending, desc="KG population") if _TQDM else pending
 
-        for doc in iterable:
+        for i, doc in enumerate(iterable):
             try:
                 result = self.run_document(doc)
                 results.append(result)
                 done.add(doc.section_id)
-                self._save_checkpoint(done)
+                if i % 50 == 0 or i == len(pending) - 1:
+                    self._save_checkpoint(done)
                 print(
                     f"[kg] {doc.metadata.company_name} "
                     f"({doc.section_type.value}): "
@@ -154,6 +153,7 @@ class KGPopulationPipeline:
             except Exception as e:
                 print(f"[kg] ERROR on {doc.section_id}: {e}", file=sys.stderr)
 
+        self._save_checkpoint(done)
         return results
 
     def apply_schema(self) -> None:
