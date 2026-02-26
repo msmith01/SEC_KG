@@ -33,8 +33,38 @@ ChromaDB provides a companion vector store for sentence-level semantic search.
 Copy `.env.example` to `.env` and fill in values. Key settings:
 
 - `LLM_PROVIDER` — `ollama` (default, local), `anthropic`, or `openai`
-- Neo4j runs locally; start it before running the Python pipeline
+- Neo4j runs in Docker (`neo4j-sec`); start it before running the Python pipeline: `docker start neo4j-sec`
 - Python virtualenv is at `.venv/` — activate with `source .venv/bin/activate` (but the bin only has `python`/`python3`, so use `.venv/bin/python` directly or install properly)
+
+## Accessing Neo4j Browser from Windows
+
+The Ubuntu machine runs Neo4j in Docker, bound on `0.0.0.0:7474` (browser) and `0.0.0.0:7687` (bolt). It is accessible from any machine on the LAN.
+
+**Ubuntu machine IP:** `192.168.1.39`
+
+Steps:
+1. Start Neo4j on Ubuntu (if not already running): `docker start neo4j-sec`
+2. On Windows, open a browser and go to: `http://192.168.1.39:7474`
+3. In the connection dialog use:
+   - **Connect URL:** `bolt://192.168.1.39:7687`
+   - **Username:** `neo4j`
+   - **Password:** `password`
+
+> Note: the bolt URL in the browser dialog must use the Ubuntu LAN IP, not `localhost`.
+
+**Useful starter queries:**
+```cypher
+// FiscalYear chain
+MATCH p=(fy:FiscalYear)-[:PRECEDES*]->(fy2:FiscalYear) RETURN p LIMIT 20
+
+// Company → filings → fiscal year
+MATCH p=(c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+RETURN p LIMIT 50
+
+// Risk factors with drivers
+MATCH p=(rf:RiskFactor)-[:DRIVEN_BY]->(rd:RiskDriver)
+RETURN p LIMIT 100
+```
 
 Install Python deps:
 ```bash

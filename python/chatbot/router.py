@@ -1,0 +1,115 @@
+"""
+Query router — classifies intent and extracts entities from the question.
+Uses the LLM to output structured JSON, then resolves company names against
+the graph.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+import config
+from models.llm_client import LLMClient
+from chatbot.memory import ConversationState
+from chatbot.prompts import ROUTER_SYSTEM, ROUTER_TEMPLATE
+
+
+# Fallback: load ticker→name map for alias resolution
+def _load_ticker_map() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    try:
+        import csv
+        with open(config.TICKER_CIK_FILE) as f:
+            for row in csv.DictReader(f):
+                ticker = row.get("ticker", "").upper().strip()
+                cik    = row.get("cik", "").strip().lstrip("0")
+                if ticker and cik:
+                    mapping[ticker] = cik
+    except Exception:
+        pass
+    return mapping
+
+
+_TICKER_MAP = _load_ticker_map()
+
+
+class Router:
+    def __init__(self, llm: LLMClient):
+        self.llm = llm
+
+    def route(self, question: str, state: ConversationState) -> dict:
+        """
+        Returns a routing dict:
+        {
+          intent, company, cik, years, topic, cypher_hint
+        }
+        """
+        prompt = ROUTER_TEMPLATE.format(
+            context_summary=state.context_summary(),
+            history=state.history_text(),
+            question=question,
+        )
+
+        raw = self.llm.complete(prompt, system=ROUTER_SYSTEM, temperature=0.0)
+        routing = self._parse_json(raw)
+
+        # Resolve ticker alias to CIK if we got a ticker-like company
+        routing = self._resolve_company(routing)
+
+        # Fill blanks from conversation state
+        routing = self._fill_from_context(routing, state)
+
+        return routing
+
+    def _parse_json(self, raw: str) -> dict:
+        raw = raw.strip()
+        # Strip markdown fences
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Try to extract first JSON object
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group())
+                except Exception:
+                    pass
+        return {
+            "intent": "company",
+            "company": None,
+            "cik": None,
+            "years": None,
+            "topic": None,
+            "cypher_hint": "general company query",
+        }
+
+    def _resolve_company(self, routing: dict) -> dict:
+        company = routing.get("company")
+        if not company:
+            return routing
+        upper = company.upper().strip()
+        # Direct ticker match
+        if upper in _TICKER_MAP:
+            routing["cik"] = _TICKER_MAP[upper]
+        return routing
+
+    def _fill_from_context(self, routing: dict, state: ConversationState) -> dict:
+        """If router left company/years blank, use active context."""
+        if not routing.get("company") and state.active_company_name:
+            routing["company"] = state.active_company_name
+        if not routing.get("cik") and state.active_company_cik:
+            routing["cik"] = state.active_company_cik
+        if not routing.get("years"):
+            if state.active_year_from:
+                routing["years"] = [
+                    state.active_year_from,
+                    state.active_year_to or state.active_year_from,
+                ]
+        if not routing.get("topic") and state.active_topic:
+            routing["topic"] = state.active_topic
+        return routing

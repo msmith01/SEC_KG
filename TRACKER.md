@@ -1,6 +1,6 @@
 # SEC Knowledge Graph — Task Tracker
 
-Last updated: **2026-02-24 22:50**
+Last updated: **2026-02-25 22:30** (end of session)
 
 ### Status key
 | Symbol | Meaning |
@@ -17,7 +17,7 @@ Last updated: **2026-02-24 22:50**
 
 | # | Task | Status | Started | Completed | Notes |
 |---|------|--------|---------|-----------|-------|
-| I-1 | Neo4j Docker container (`neo4j-sec`) | ✅ | 2026-02-19 | 2026-02-19 | Exposed on `0.0.0.0:7474/7687`; accessible from Windows at `192.168.1.38` |
+| I-1 | Neo4j Docker container (`neo4j-sec`) | ✅ | 2026-02-19 | 2026-02-19 | Exposed on `0.0.0.0:7474/7687`; accessible from Windows browser at `http://192.168.1.39:7474` (bolt: `bolt://192.168.1.39:7687`, user: neo4j, pass: password) |
 | I-2 | ChromaDB local vector store | ✅ | 2026-02-19 | 2026-02-19 | Sentence-level embeddings; populated alongside preprocessing |
 | I-3 | Python package structure (`python/`) | ✅ | 2026-02-19 | 2026-02-19 | `config.py`, `models/`, `preprocessing/`, `glossary/`, `ontology/`, `kg_population/` |
 | I-4 | `.env` config file | ✅ | 2026-02-19 | 2026-02-19 | `LLM_PROVIDER`, Neo4j creds, paths — copy from `.env.example` |
@@ -100,11 +100,16 @@ Last updated: **2026-02-24 22:50**
 | O-6 | `kg_population/ner_extractor.py` — spaCy fast extractor | ✅ | 2026-02-19 | 2026-02-19 | No GPU needed; some NER noise (ORG false positives) |
 | O-7 | Checkpoint system (`.checkpoint.json`) | ✅ | 2026-02-19 | 2026-02-19 | Per-document; restarts skip already-done sections |
 | O-8 | Ollama retry / `keep_alive=-1` fix | ✅ | 2026-02-19 | 2026-02-19 | Exponential backoff; prevents VRAM eviction |
-| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Running throttled: `python3 run_kg_population.py --fast --delay 2` (PID 8839); log: `logs/kg_population_throttled.log`; ~3,961/55,600 checkpointed; ~8–23s/doc with delay; est. multi-day |
+| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Restarted unthrottled after Neo4j wipe + recovery (2026-02-25). PID 16538; log: `logs/kg_population_throttled.log`; ~862/55,600 as of 22:00; ~1–2s/doc; est. 15–20h |
 | O-10 | **LLM-mode KG re-population** | ⚠️ | — | — | Blocked on GPU; will replace spaCy NER noise with higher-quality entities |
 | O-11 | **KG pipeline performance optimisation** | ✅ | 2026-02-24 | 2026-02-24 | 3-4x speedup: (1) `nlp.pipe(batch_size=64)` instead of per-sentence calls; (2) `write_document()` — single Neo4j session per doc; (3) edge `MERGE (a)-[r:TYPE]->(b)` without `filing_ref` in key — eliminates multigraph buildup; (4) checkpoint every 50 docs. Committed `2906cb5`. Graph wiped + restarted clean. |
 | O-12 | **KG OOM crash fix — lazy document loading** | ✅ | 2026-02-24 | 2026-02-24 | Old code loaded all 55,600 JSON docs into RAM at startup (~40 GB → OOM kill after ~4h). Fixed: one doc loaded per iteration, previous doc GC'd. Fast section_id scan reads only first 100 bytes per file (8x faster). Committed `7ff22f5`. |
 | O-13 | **KG throttle flag (`--delay`)** | ✅ | 2026-02-24 | 2026-02-24 | Added `--delay N` arg to `run_kg_population.py` — sleeps N seconds between docs; passes through to `pipeline.run_all()`. Current run uses `--delay 2`. |
+
+| C-1 | **Chatbot — Phase 1 (working skeleton)** | ✅ | 2026-02-25 | 2026-02-25 | Streamlit app at `http://192.168.1.39:8501`; files in `python/chatbot/`; router + graph QA (text-to-Cypher) + semantic QA (ChromaDB) + synthesiser + memory. PID 22221; log: `logs/chatbot.log` |
+| C-2 | **Chatbot — Phase 2 (conversation quality)** | 📋 | — | — | Co-ref resolution, company alias matching, Cypher error recovery, session persistence |
+| C-3 | **Chatbot — Phase 3 (UI + graph viz)** | 📋 | — | — | pyvis graph panel, context chips, export to markdown |
+| C-4 | **Chatbot — Phase 4 (cross-company + trend)** | 📋 | — | — | Needs LLM-mode RiskFactor nodes; trend queries, sector comparison |
 
 ---
 
@@ -143,47 +148,97 @@ Last updated: **2026-02-24 22:50**
 ## Suggested Build Order
 
 ```
-[NOW — RUNNING OVERNIGHT]
-  O-9  → KG population --fast --delay 2 (PID 8839; check logs/kg_population_throttled.log)
-         Monitor: tail -f logs/kg_population_throttled.log
-         Progress: python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"
-         Neo4j: docker start neo4j-sec (if it isn't running)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+END OF SESSION: 2026-02-25 ~22:30
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[TOMORROW — first things]
-  1. Restart R collection (stopped overnight):
-       bash run_parallel_collection.sh 2023 4
-       bash run_parallel_collection.sh 2024 4
-  2. Start glossary rebuild (failed to launch last session — log was 0 bytes):
-       python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
-  3. Check KG checkpoint progress and adjust --delay if CPU still high
+WHAT IS RUNNING OVERNIGHT (do not kill these):
+  PID 16538 — KG population (--fast, unthrottled)
+              951/55,600 checkpointed at session end
+              log: logs/kg_population_throttled.log
+  PID 22221 — Streamlit chatbot (port 8501)
+              log: logs/chatbot.log
+  Docker    — neo4j-sec (up, clean DB, wiped + rebuilt tonight)
 
-[While O-9 runs]
-  G-5  → rebuild glossary from full corpus (can run in parallel — lightweight, CPU-only)
-         python3 python/run_glossary.py --rules-only --index-chroma
+WHAT IS NOT RUNNING (needs manual start tomorrow):
+  1. R collection 2023: bash run_parallel_collection.sh 2023 4 > logs/collection_2023.log 2>&1 &
+  2. R collection 2024: bash run_parallel_collection.sh 2024 4 > logs/collection_2024.log 2>&1 &
+  3. Glossary rebuild:  python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
 
-[After 2023/2024 collection + O-9 completes]
-  R-10 → start 1993-2014 historical collection
-         bash run_smart_collection.sh 1993 2014 4 6
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOMORROW — STEP BY STEP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[After full corpus in graph]
-  E-4  → graph quality audit / NER noise cleanup  ← lots of false-positive Competitor nodes
-  E-1  → cross-year semantic linking  ← biggest graph value-add
-  E-2  → cross-section linking
+STEP 1 — Check overnight processes (5 min)
+  # Is KG population still alive?
+  ps aux | grep kg_population | grep -v grep
+  tail -5 logs/kg_population_throttled.log
+  python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"
 
-[After enrichment]
-  A-1  → risk co-occurrence
-  A-3  → temporal trends
+  # If dead, restart:
+  nohup python3 python/run_kg_population.py --fast > logs/kg_population_throttled.log 2>&1 &
 
-[Product layer]
-  Q-1  → RAG query interface
-  Q-3  → analyst dashboard
+  # Is Neo4j up?
+  docker ps --filter name=neo4j-sec --format "{{.Status}}"
+  # If down: docker start neo4j-sec
+
+  # Is chatbot up?
+  ps aux | grep streamlit | grep -v grep
+  # If down: nohup streamlit run python/chatbot/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true > logs/chatbot.log 2>&1 &
+
+STEP 2 — Start the things that weren't running (5 min)
+  bash run_parallel_collection.sh 2023 4 > logs/collection_2023.log 2>&1 &
+  bash run_parallel_collection.sh 2024 4 > logs/collection_2024.log 2>&1 &
+  python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
+
+STEP 3 — Test the chatbot (10 min)
+  Open: http://192.168.1.39:8501
+  Test these questions in order:
+    a. "What companies are currently in the graph?"      ← graph QA, no LLM risk
+    b. "Which companies mention China in their filings?" ← geo market query
+    c. "Show me supply chain risk mentions"              ← falls back to ChromaDB
+    d. "What are the most common competitors mentioned?" ← cross-company
+  Check: do answers cite sources? Is the Cypher expandable? Does context carry between turns?
+
+STEP 4 — Chatbot Phase 2 improvements (main dev work)
+  Issues likely found in Step 3:
+    a. Company name resolution — graph has UPPER CASE names, user types natural case.
+       Fix in router.py: after LLM routing, do a fuzzy MATCH against Company nodes in Neo4j
+       to resolve "Tyson" → "TYSON FOODS INC".
+    b. Cypher error recovery — if Neo4j rejects the generated query, ask the LLM to fix it
+       once before returning empty results. Add to graph_qa.py.
+    c. "No results" messaging — when graph is sparse (only ~1-3% populated), the synthesiser
+       should always explain what IS in the graph instead of just saying "no data found".
+       Already partially handled by the _overview fallback in graph_qa.py — verify it works.
+    d. Session persistence — save conversation to JSON file so it survives chatbot restarts.
+       Add to memory.py: save_to_file() / load_from_file().
+
+STEP 5 — Chatbot Phase 3: graph visualisation panel (optional, if time)
+  Add pyvis subgraph rendering to app.py.
+  After each answer, extract node IDs from graph_rows and render a pyvis HTML component
+  showing the subgraph of entities referenced in the answer.
+  See CHATBOT_DESIGN.md Phase 3 section for details.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BIGGER PICTURE — after KG population completes (~15-20h from session end)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Once O-9 finishes:
+  - Run LLM-mode KG population for a target company set (e.g. S&P 500 subset):
+      python3 python/run_kg_population.py --section risk_factors
+    This adds RiskFactor, RiskDriver, RiskConsequence, Mitigation nodes —
+    unlocking the most valuable chatbot query types.
+  - Start 1993-2014 historical collection:
+      bash run_smart_collection.sh 1993 2014 4 6
+  - Graph quality audit (E-4): Cypher queries to identify spaCy false-positive Competitor nodes
+  - Cross-year semantic linking (E-1): SUPERSEDES edges between same risk across years
 ```
 
 ## Log Locations
 
 | Log | What it covers |
 |-----|----------------|
-| `logs/kg_population_throttled.log` | KG population (current run — throttled `--delay 2`) |
+| `logs/kg_population_throttled.log` | KG population (current run — unthrottled, PID 16538) |
+| `logs/chatbot.log` | Streamlit chatbot (PID 22221, port 8501) |
 | `logs/collection_<year>_worker_N.log` | R data collection per year/worker |
 | `logs/preprocessing.log` | Hourly preprocessing cron |
 | `logs/daily_update.log` | Daily EDGAR collection cron |
