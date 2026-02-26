@@ -193,10 +193,11 @@ class Product(BaseModel):
 
 
 class GeographicMarket(BaseModel):
-    node_id:    str                   # geo_{iso_country_code}
-    name:       str
-    iso_code:   Optional[str] = None
-    level:      str = "country"       # country | region | global
+    node_id:          str                   # geo_{iso_country_code}
+    name:             str
+    iso_code:         Optional[str] = None
+    level:            str = "country"       # country | region | global
+    extraction_source: Optional[str] = None  # "spacy" | "llm"
 
     @classmethod
     def make_id(cls, iso_code: str) -> str:
@@ -213,9 +214,10 @@ class CustomerSegment(BaseModel):
 
 
 class Competitor(BaseModel):
-    node_id: str                      # comp_{cik} | comp_{slug}
-    name:    str
-    cik:     Optional[str] = None     # None if private
+    node_id:          str                      # comp_{cik} | comp_{slug}
+    name:             str
+    cik:              Optional[str] = None     # None if private
+    extraction_source: Optional[str] = None   # "spacy" | "llm"
 
     @classmethod
     def make_id(cls, name: str, cik: Optional[str] = None) -> str:

@@ -109,10 +109,11 @@ class Normaliser:
     Maintains node registries to deduplicate and enable relation linking.
     """
 
-    def __init__(self, doc: SectionDocument):
-        self.doc  = doc
-        self.meta = doc.metadata
-        self._prov = _make_provenance(doc)
+    def __init__(self, doc: SectionDocument, extraction_method: str = "llm"):
+        self.doc              = doc
+        self.meta             = doc.metadata
+        self._extraction_method = extraction_method
+        self._prov = _make_provenance(doc, method=extraction_method)
 
         # node_id → typed node
         self._nodes: dict[str, object] = {}
@@ -333,6 +334,7 @@ class Normaliser:
                 name=name or iso,
                 iso_code=iso,
                 level=item.get("level", "country"),
+                extraction_source=self._extraction_method,
             )
             self._name_index[name.lower()] = nid
         return nid
@@ -350,7 +352,10 @@ class Normaliser:
         cik = _resolve_competitor_cik(name)
         nid = Competitor.make_id(name, cik)
         if nid not in self._nodes:
-            self._nodes[nid] = Competitor(node_id=nid, name=name, cik=cik)
+            self._nodes[nid] = Competitor(
+                node_id=nid, name=name, cik=cik,
+                extraction_source=self._extraction_method,
+            )
             self._name_index[name.lower()] = nid
         return nid
 

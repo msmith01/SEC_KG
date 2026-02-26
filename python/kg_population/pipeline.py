@@ -70,9 +70,10 @@ class KGPopulationPipeline:
                         faster — no GPU/API required. Good for demos and
                         initial graph population.
         """
-        self._extractor      = NERExtractor() if fast_mode else KGExtractor(llm_client)
-        self._dry_run        = dry_run
-        self._checkpoint_file = _CHECKPOINT_FAST if fast_mode else _CHECKPOINT_LLM
+        self._extractor         = NERExtractor() if fast_mode else KGExtractor(llm_client)
+        self._dry_run           = dry_run
+        self._extraction_method = "spacy" if fast_mode else "llm"
+        self._checkpoint_file   = _CHECKPOINT_FAST if fast_mode else _CHECKPOINT_LLM
         self._graph          = None
         self._writer         = None
 
@@ -93,7 +94,7 @@ class KGPopulationPipeline:
         raw = self._extractor.extract(doc)
 
         # 2. Normalise
-        normaliser = Normaliser(doc)
+        normaliser = Normaliser(doc, extraction_method=self._extraction_method)
         nodes, edges = normaliser.normalise(raw)
 
         # 3. Write
