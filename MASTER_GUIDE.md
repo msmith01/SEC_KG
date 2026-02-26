@@ -214,7 +214,7 @@ python python/run_kg_population.py --fast
 python python/run_kg_population.py --section risk_factors
 ```
 
-The checkpoint at `python/data/kg_export/.checkpoint.json` makes this resumable — if interrupted, just re-run the same command.
+The pipeline is resumable — if interrupted, just re-run the same command. Checkpoints are mode-specific: `.checkpoint_fast.json` for `--fast` mode, `.checkpoint_llm.json` for LLM mode.
 
 ### Step 10 — Verify the graph
 
@@ -401,14 +401,30 @@ python python/run_glossary.py --index-chroma  # also populate ChromaDB
 3. Normalizes entity names (deduplication)
 4. Writes typed nodes and edges to Neo4j
 
-**Two modes:**
-- `--fast` — spaCy NER. No GPU needed. Processes the full corpus quickly. Some noise in entity recognition.
-- Default — LLM extraction. Higher quality but requires working GPU (Ollama) or API key. Currently blocked on GPU stability.
+**Two modes — separate checkpoints, coexist in the same graph (additive, never destructive):**
 
-**Checkpointing:** `python/data/kg_export/.checkpoint.json`
-- Tracks which documents have been processed per section
-- Re-running the same command safely skips already-done documents
-- Delete this file to force a complete re-run
+| | `--fast` (spaCy NER) | Default (LLM) |
+|---|---|---|
+| Speed | ~1 doc/sec, no GPU needed | ~0.1 doc/sec, requires GPU or API key |
+| Node types | Company, Filing, FiscalYear, Section, Competitor, GeographicMarket, Product | All of the above **+** RiskFactor, RiskDriver, RiskConsequence, Mitigation, BusinessSegment, MacroFactor, ManagementOutlook |
+| Data quality | Fast but noisy — NER over-fires on non-geographic text | Higher precision, full semantic understanding |
+| Checkpoint | `.checkpoint_fast.json` | `.checkpoint_llm.json` |
+| Best for | Structural skeleton, geography/competitor coverage pass | Risk analysis, full semantic graph |
+
+**How they coexist:**
+- Both write to Neo4j using `MERGE` (upsert on `node_id`) — **neither mode deletes or overwrites the other's data**
+- Structural nodes (Company, Filing, FiscalYear, Section) come from filing metadata, not NER — identical and safe in both modes
+- Extracted nodes (GeographicMarket, Competitor, Product) from both modes coexist; LLM versions are higher quality but spaCy versions are not removed
+- LLM-only nodes (RiskFactor, RiskDriver, etc.) are simply absent until LLM mode runs
+- **Never reset a mode's checkpoint to "upgrade" to the other mode.** Run them independently.
+
+**100% LLM vs spaCy + LLM:**
+The long-term target is 100% LLM extraction — it produces a cleaner graph with no NER noise and covers all node types in one pass. spaCy fast mode was designed as a "get something queryable quickly" shortcut. If GPU is stable, prefer running LLM mode on the full corpus. The structural nodes (Company, Filing, FiscalYear, Section) are written identically by both modes from metadata, so there is no loss from skipping fast mode entirely.
+
+**Checkpoints:**
+- Fast mode: `python/data/kg_export/.checkpoint_fast.json`
+- LLM mode:  `python/data/kg_export/.checkpoint_llm.json`
+- Deleting one checkpoint re-runs only that mode; the other is unaffected
 
 ```bash
 # Setup (once only)
@@ -417,12 +433,21 @@ python python/run_kg_population.py --apply-schema
 # Test (no writes)
 python python/run_kg_population.py --dry-run --section risk_factors --limit 1
 
-# Fast mode — recommended for full corpus
-python python/run_kg_population.py --fast --section risk_factors
+# Fast mode — structural + NER pass (no GPU needed)
 python python/run_kg_population.py --fast
 
-# LLM mode (requires GPU/API)
-python python/run_kg_population.py --section risk_factors
+# LLM mode — full semantic extraction (requires GPU/API)
+python python/run_kg_population.py
+
+# Check progress of each mode
+python3 -c "import json; print('fast:', len(json.load(open('python/data/kg_export/.checkpoint_fast.json'))), '/ ~55600')"
+python3 -c "import json; print('llm: ', len(json.load(open('python/data/kg_export/.checkpoint_llm.json'))), '/ ~55600')"
+
+# Re-run LLM mode from scratch (spaCy data untouched)
+echo '[]' > python/data/kg_export/.checkpoint_llm.json && python python/run_kg_population.py
+
+# Re-run fast mode from scratch (LLM data untouched)
+echo '[]' > python/data/kg_export/.checkpoint_fast.json && python python/run_kg_population.py --fast
 ```
 
 ---
@@ -699,8 +724,8 @@ header = {
 - **Running overnight:** `nohup python3 python/run_kg_population.py --fast --delay 2 > logs/kg_population_throttled.log 2>&1 &` (PID 8839)
 - **~3,961 / 55,600 docs done** (checkpoint as of 22:50 on 2026-02-24); ~8–23s/doc with delay
 - Monitor: `tail -f logs/kg_population_throttled.log`
-- Check progress: `python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"`
-- Checkpoint at `python/data/kg_export/.checkpoint.json`
+- Check progress (fast): `python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint_fast.json')); print(len(d), '/ ~55600')"`
+- Check progress (llm):  `python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint_llm.json')); print(len(d), '/ ~55600')"`
 - **Neo4j runs in Docker:** `docker start neo4j-sec` if not running
 
 ### Pipeline Performance (after 2026-02-24 optimisation)
@@ -749,7 +774,7 @@ The KG population pipeline was profiled and optimised (commit `2906cb5`):
 ```bash
 # KG population — check progress:
 tail -f logs/kg_population_throttled.log
-python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600 docs')"
+python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint_fast.json')); print('fast:', len(d), '/ ~55600 docs')"
 ```
 
 ### Tomorrow — first three things
@@ -763,7 +788,7 @@ nohup bash run_parallel_collection.sh 2024 4 > logs/collection_2024_restart.log 
 nohup python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
 
 # 3. Check KG checkpoint and adjust --delay if CPU still high
-python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600 docs')"
+python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint_fast.json')); print('fast:', len(d), '/ ~55600 docs')"
 ```
 
 ### While KG population runs — glossary rebuild (safe to run in parallel)
@@ -790,7 +815,8 @@ bash run_smart_collection.sh 1993 2014 4 6
 #    PERSISTED_TO / EMERGED_IN / RESOLVED_IN edges between RiskFactor nodes
 
 # 3. Re-run with LLM once GPU is stable (higher quality extraction)
-rm python/data/kg_export/.checkpoint.json
+# Fast-mode data stays in graph; LLM adds semantic nodes on top
+echo '[]' > python/data/kg_export/.checkpoint_llm.json
 python3 python/run_kg_population.py --section risk_factors
 ```
 
@@ -1020,7 +1046,7 @@ while True:
 g.close()
 "
 python3 python/run_kg_population.py --apply-schema
-echo '[]' > python/data/kg_export/.checkpoint.json
+echo '[]' > python/data/kg_export/.checkpoint_fast.json
 nohup python3 -u python/run_kg_population.py --fast > logs/kg_population_fast.log 2>&1 &
 ```
 
@@ -1035,12 +1061,12 @@ Check log files in `logs/collection_<year>_worker_N.log`. Common causes:
 
 Check the checkpoint file:
 ```bash
-cat python/data/kg_export/.checkpoint.json | python3 -m json.tool | head -20
+python3 -c "import json; print(len(json.load(open('python/data/kg_export/.checkpoint_fast.json'))), 'docs in fast checkpoint')"
 ```
 
-If everything is checkpointed as done but the graph is empty, the writer may have been in dry-run mode. Check your command used `--fast` and not `--dry-run`. Delete the checkpoint and re-run:
+If everything is checkpointed as done but the graph is empty, the writer may have been in dry-run mode. Check your command used `--fast` and not `--dry-run`. Delete the appropriate checkpoint and re-run:
 ```bash
-rm python/data/kg_export/.checkpoint.json
+echo '[]' > python/data/kg_export/.checkpoint_fast.json
 python python/run_kg_population.py --fast --section risk_factors
 ```
 

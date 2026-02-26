@@ -308,3 +308,13 @@ What makes this hard to replicate:
 - **ChromaDB + graph hybrid** — combining structured graph queries with vector similarity is a meaningful technical differentiator vs pure-text competitors
 
 The weakest point: all data is public (SEC EDGAR is free). The moat is entirely in the quality of extraction, structuring, and interface — not data exclusivity.
+
+---
+
+## 14. Chatbot Enhancements
+
+### 14.1 Excel / Table Export
+
+**Idea:** When a question returns structured/comparative data (e.g. "compare tariff exposure across these 5 companies", "top 10 risk drivers in semiconductors 2022"), the chatbot should detect this and offer a downloadable Excel or CSV table alongside the prose answer.
+
+**Notes:** To be fleshed out further.

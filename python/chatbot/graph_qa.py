@@ -50,9 +50,10 @@ class GraphQA:
 
         rows = self._execute(cypher)
 
-        # If nothing came back, also fetch a quick overview so the synthesiser
-        # knows what IS in the graph
-        if not rows:
+        # If nothing came back or the query errored, fetch a quick overview so
+        # the synthesiser knows what IS in the graph
+        has_error = rows and rows[0].get("error")
+        if not rows or has_error:
             overview = self._execute(
                 "MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC"
             )

@@ -26,7 +26,8 @@ from typing import Iterator, Optional
 
 _SECTION_ID_RE = re.compile(rb'"section_id"\s*:\s*"([^"]+)"')
 
-_CHECKPOINT_FILE = Path(__file__).parent.parent / "data" / "kg_export" / ".checkpoint.json"
+_CHECKPOINT_FAST = Path(__file__).parent.parent / "data" / "kg_export" / ".checkpoint_fast.json"
+_CHECKPOINT_LLM  = Path(__file__).parent.parent / "data" / "kg_export" / ".checkpoint_llm.json"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -69,10 +70,11 @@ class KGPopulationPipeline:
                         faster — no GPU/API required. Good for demos and
                         initial graph population.
         """
-        self._extractor = NERExtractor() if fast_mode else KGExtractor(llm_client)
-        self._dry_run   = dry_run
-        self._graph     = None
-        self._writer    = None
+        self._extractor      = NERExtractor() if fast_mode else KGExtractor(llm_client)
+        self._dry_run        = dry_run
+        self._checkpoint_file = _CHECKPOINT_FAST if fast_mode else _CHECKPOINT_LLM
+        self._graph          = None
+        self._writer         = None
 
         if not dry_run:
             self._graph  = graph or Neo4jGraph()
@@ -133,7 +135,7 @@ class KGPopulationPipeline:
             section_type: Process only this section (None = all three).
             limit:        Max number of documents to process (useful for testing).
         """
-        done = self._load_checkpoint()
+        done = self._load_checkpoint(self._checkpoint_file)
 
         # Build pending list from filenames only — no JSON parsing yet
         all_files = list(self._iter_doc_files(section_type))
@@ -156,7 +158,7 @@ class KGPopulationPipeline:
                 results.append(result)
                 done.add(section_id)
                 if i % 50 == 0 or i == len(pending) - 1:
-                    self._save_checkpoint(done)
+                    self._save_checkpoint(done, self._checkpoint_file)
                 print(
                     f"[kg] {doc.metadata.company_name} "
                     f"({doc.section_type.value}): "
@@ -168,7 +170,7 @@ class KGPopulationPipeline:
             if delay > 0:
                 time.sleep(delay)
 
-        self._save_checkpoint(done)
+        self._save_checkpoint(done, self._checkpoint_file)
         return results
 
     def apply_schema(self) -> None:
@@ -218,20 +220,20 @@ class KGPopulationPipeline:
     # ── Checkpoint helpers ────────────────────────────────────────────────────
 
     @staticmethod
-    def _load_checkpoint() -> set[str]:
+    def _load_checkpoint(path: Path) -> set[str]:
         """Return the set of section_ids that have already been processed."""
-        if _CHECKPOINT_FILE.exists():
+        if path.exists():
             try:
-                return set(json.loads(_CHECKPOINT_FILE.read_text()))
+                return set(json.loads(path.read_text()))
             except Exception:
                 pass
         return set()
 
     @staticmethod
-    def _save_checkpoint(done: set[str]) -> None:
+    def _save_checkpoint(done: set[str], path: Path) -> None:
         """Persist the set of completed section_ids to disk."""
-        _CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CHECKPOINT_FILE.write_text(json.dumps(sorted(done), indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sorted(done), indent=2))
 
     def _dump_dry_run(self, section_id: str, nodes: list, edges: list) -> None:
         """Write dry-run output to data/kg_export/ for inspection."""

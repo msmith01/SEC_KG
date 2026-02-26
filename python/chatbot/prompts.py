@@ -52,15 +52,15 @@ IMPORTANT NOTES:
 
 CYPHER_EXAMPLES = """
 EXAMPLE 1 — Company's geographic market footprint:
-MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:HAS_SECTION]->(s:Section)-[:MENTIONS_MARKET]->(g:GeographicMarket)
-WHERE toLower(c.name) CONTAINS toLower($company)
-RETURN DISTINCT g.name AS market, count(f) AS filings_mentioning
-ORDER BY filings_mentioning DESC
+MATCH (c:Company)-[:OPERATES_IN]->(g:GeographicMarket)
+WHERE toLower(c.name) CONTAINS "henry schein"
+RETURN c.name AS company, collect(DISTINCT g.name) AS markets
 
 EXAMPLE 2 — Companies with exposure to a specific country:
 MATCH (c:Company)-[:OPERATES_IN]->(g:GeographicMarket)
-WHERE toLower(g.name) CONTAINS toLower($country)
-RETURN c.name, c.ticker ORDER BY c.name
+WHERE toLower(g.name) CONTAINS "china"
+RETURN c.name AS company, c.ticker AS ticker, collect(DISTINCT g.name) AS china_markets
+ORDER BY company LIMIT 50
 
 EXAMPLE 3 — Risk factors for a company (requires LLM-mode graph):
 MATCH (c:Company)-[:HAS_RISK]->(rf:RiskFactor)
@@ -84,8 +84,8 @@ RETURN c.name, count(rf) AS exposure
 ORDER BY exposure DESC LIMIT 20
 
 EXAMPLE 6 — What competitors a company mentions:
-MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:HAS_SECTION]->(s:Section)-[:MENTIONS_COMPETITOR]->(comp:Competitor)
-WHERE toLower(c.name) CONTAINS toLower($company)
+MATCH (c:Company)-[:COMPETES_WITH]->(comp:Competitor)
+WHERE toLower(c.name) CONTAINS "amazon"
 RETURN comp.name, count(*) AS mentions
 ORDER BY mentions DESC LIMIT 20
 
@@ -149,8 +149,10 @@ Hint: {cypher_hint}
 Question: {question}
 
 Rules:
-- Use toLower() + CONTAINS for company name matching (names are upper case in graph)
+- Use toLower() + CONTAINS for company/market name matching (names are upper case in graph)
 - Use OPTIONAL MATCH for nodes that may not exist (RiskFactor, RiskDriver etc.)
+- ALWAYS include c.name AS company in RETURN so results can be attributed to a company
+- Use collect(DISTINCT ...) to group related values onto one row per company
 - Return at most 50 rows (use LIMIT 50)
 - If years are given, filter: WHERE f.fiscal_year >= {year_from} AND f.fiscal_year <= {year_to}
 - Output ONLY the Cypher query, nothing else

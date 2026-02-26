@@ -54,6 +54,14 @@ with st.sidebar:
     st.title("SEC KG Chat")
     st.caption("Ask questions about 10-K filings")
 
+    page = st.radio(
+        "Page",
+        ["Chat", "Dataset Statistics"],
+        label_visibility="collapsed",
+    )
+
+    st.divider()
+
     provider = st.selectbox(
         "LLM provider",
         ["ollama", "anthropic", "openai"],
@@ -86,6 +94,13 @@ with st.sidebar:
     for ex in examples:
         if st.button(ex, key=f"ex_{ex[:20]}"):
             st.session_state["prefill"] = ex
+
+
+# ── Stats page ────────────────────────────────────────────────────────────────
+if page == "Dataset Statistics":
+    from chatbot.stats_page import render_stats
+    render_stats()
+    st.stop()
 
 
 # ── Main chat area ────────────────────────────────────────────────────────────
