@@ -5,55 +5,60 @@ All prompt templates for the chatbot pipeline.
 # ── Graph schema fed to the Cypher-generation LLM ────────────────────────────
 
 GRAPH_SCHEMA = """
-Node labels and their key properties:
-  Company          : name (string), cik (string), ticker (string), sic_code (string)
-  Filing           : accession_number (string), filing_date (string), fiscal_year (int), form_type (string)
-  Section          : section_type (string: "risk_factors"|"business"|"mda"), accession_number (string)
-  FiscalYear       : year (int)
-  RiskFactor       : summary (string), category (string), severity (string), accession_number (string)
-  RiskDriver       : name (string), driver_type (string)
-  RiskConsequence  : description (string)
-  Mitigation       : description (string), mitigation_type (string)
-  GeographicMarket : name (string), iso_code (string)
-  Competitor       : name (string)
-  Product          : name (string)
-  BusinessSegment  : name (string), revenue_pct (float)
-  FinancialMetric  : name (string), value (float), unit (string), fiscal_year (int)
-  MacroFactor      : name (string), direction (string)
-  ManagementOutlook: summary (string), sentiment (string), horizon (string)
+Node labels and key properties (* = actually populated in current graph):
+  Company*          : name (string, UPPER CASE), cik (string), ticker (string)
+  Filing*           : accession_number (string), cik (string), filing_date (string), form_type (string)
+                      NOTE: Filing has NO fiscal_year property — get year via FILED_IN → FiscalYear
+  Section*          : section_type (string: "risk_factors"|"business"|"mda"),
+                      accession (string, links to Filing.accession_number), word_count (int)
+  FiscalYear*       : year (int)
+  GeographicMarket* : name (string), iso_code (string), level (string)
+  Competitor*       : name (string)
+  ManagementOutlook*: text (string), sentiment (string: "positive"|"negative"|"neutral"),
+                      horizon (string), accession (string, links to Filing.accession_number), cik (string)
+  FinancialMetric*  : name (string), as_of_year (int), direction (string),
+                      accession (string, links to Filing.accession_number), cik (string)
+  RiskFactor        : [LLM mode only — no nodes yet] summary, category, severity, accession_number
+  RiskDriver        : [LLM mode only — no nodes yet] name, driver_type
+  RiskConsequence   : [LLM mode only — no nodes yet] description
+  Mitigation        : [LLM mode only — no nodes yet] description, mitigation_type
+  Product           : [LLM mode only — no nodes yet] name
+  BusinessSegment   : [LLM mode only — no nodes yet] name, revenue_pct
+  MacroFactor       : [LLM mode only — no nodes yet] name, direction
 
 Relationships (direction matters):
   (Filing)-[:FILED_BY]->(Company)
   (Filing)-[:HAS_SECTION]->(Section)
   (Filing)-[:FILED_IN]->(FiscalYear)
   (FiscalYear)-[:PRECEDES]->(FiscalYear)
-  (Company)-[:HAS_RISK]->(RiskFactor)
-  (RiskFactor)-[:CAUSED_BY]->(RiskDriver)
-  (RiskFactor)-[:MAY_RESULT_IN]->(RiskConsequence)
-  (RiskFactor)-[:MITIGATED_BY]->(Mitigation)
-  (RiskFactor)-[:SUPERSEDES]->(RiskFactor)
-  (RiskFactor)-[:RELATED_TO]->(RiskFactor)
   (Company)-[:OPERATES_IN]->(GeographicMarket)
   (Company)-[:COMPETES_WITH]->(Competitor)
-  (Company)-[:HAS_SEGMENT]->(BusinessSegment)
-  (Company)-[:OFFERS]->(Product)
   (Company)-[:HAS_OUTLOOK]->(ManagementOutlook)
-  (FinancialMetric)-[:IMPACTED_BY]->(MacroFactor)
+  (Company)-[:HAS_RISK]->(RiskFactor)         [LLM mode only]
+  (RiskFactor)-[:CAUSED_BY]->(RiskDriver)     [LLM mode only]
+  (RiskFactor)-[:MAY_RESULT_IN]->(RiskConsequence) [LLM mode only]
+  (RiskFactor)-[:MITIGATED_BY]->(Mitigation)  [LLM mode only]
+  (Company)-[:HAS_SEGMENT]->(BusinessSegment) [LLM mode only]
+  (Company)-[:OFFERS]->(Product)              [LLM mode only]
 
-IMPORTANT NOTES:
-- RiskFactor, RiskDriver, etc. only exist if LLM-mode KG population was run.
-  In fast-mode (spaCy), only Company/Filing/Section/FiscalYear/Competitor/GeographicMarket/Product exist.
-- Always use OPTIONAL MATCH for nodes that may not exist (RiskFactor etc.)
-- Company names are UPPER CASE in the graph (e.g. "TYSON FOODS INC", "COCA COLA CO")
-- Use toLower() + CONTAINS for fuzzy company name matching
+YEAR FILTERING — Filing has no fiscal_year property. Always filter year via FiscalYear node:
+  MATCH (f:Filing)-[:FILED_IN]->(fy:FiscalYear) WHERE fy.year = 2022
+  For ManagementOutlook/FinancialMetric/Section, join via accession:
+  MATCH (f:Filing) WHERE f.accession_number = mo.accession
+  MATCH (f)-[:FILED_IN]->(fy:FiscalYear) WHERE fy.year = 2022
+
+COMPANY MATCHING:
+  If cik is provided: use exact match WHERE c.cik = "<cik>"  (preferred — no fuzzy needed)
+  If only name available: WHERE toLower(c.name) CONTAINS toLower("<name>")
+  If only ticker available: WHERE toLower(c.ticker) = toLower("<ticker>")
 """
 
 # ── Cypher examples fed to the generation LLM ────────────────────────────────
 
 CYPHER_EXAMPLES = """
-EXAMPLE 1 — Company's geographic market footprint:
+EXAMPLE 1 — Company's geographic market footprint (by CIK — preferred):
 MATCH (c:Company)-[:OPERATES_IN]->(g:GeographicMarket)
-WHERE toLower(c.name) CONTAINS "henry schein"
+WHERE c.cik = "1096752"
 RETURN c.name AS company, collect(DISTINCT g.name) AS markets
 
 EXAMPLE 2 — Companies with exposure to a specific country:
@@ -62,40 +67,66 @@ WHERE toLower(g.name) CONTAINS "china"
 RETURN c.name AS company, c.ticker AS ticker, collect(DISTINCT g.name) AS china_markets
 ORDER BY company LIMIT 50
 
-EXAMPLE 3 — Risk factors for a company (requires LLM-mode graph):
-MATCH (c:Company)-[:HAS_RISK]->(rf:RiskFactor)
-WHERE toLower(c.name) CONTAINS toLower($company)
-OPTIONAL MATCH (rf)-[:CAUSED_BY]->(rd:RiskDriver)
-RETURN rf.summary, rf.category, rf.severity, collect(rd.name) AS drivers
-ORDER BY rf.severity DESC LIMIT 20
+EXAMPLE 3 — MD&A outlook text for a company in a specific year:
+MATCH (c:Company)-[:HAS_OUTLOOK]->(mo:ManagementOutlook)
+WHERE c.cik = "1318605"
+MATCH (f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+WHERE f.accession_number = mo.accession AND fy.year = 2022
+RETURN mo.text AS outlook, mo.sentiment, mo.horizon, fy.year AS year
+ORDER BY mo.sentiment LIMIT 30
 
-EXAMPLE 4 — How a company's risk disclosures changed over time:
+EXAMPLE 4 — MD&A outlook across all years for a company (temporal):
+MATCH (c:Company)-[:HAS_OUTLOOK]->(mo:ManagementOutlook)
+WHERE c.cik = "1318605"
+MATCH (f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+WHERE f.accession_number = mo.accession
+RETURN fy.year AS year, mo.sentiment, mo.text AS outlook
+ORDER BY fy.year DESC LIMIT 50
+
+EXAMPLE 5 — What years a company has filings for (always run this when year query returns empty):
+MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+WHERE c.cik = "1318605"
+RETURN c.name AS company, collect(DISTINCT fy.year) AS available_years
+
+EXAMPLE 6 — Companies in the graph with filing counts:
 MATCH (c:Company)<-[:FILED_BY]-(f:Filing)
-WHERE toLower(c.name) CONTAINS toLower($company)
-MATCH (c)-[:HAS_RISK]->(rf:RiskFactor)
-WHERE rf.accession_number = f.accession_number
-RETURN f.fiscal_year, rf.category, count(rf) AS count
-ORDER BY f.fiscal_year, rf.category
+RETURN c.name AS company, c.ticker AS ticker, count(f) AS filing_count
+ORDER BY filing_count DESC LIMIT 30
 
-EXAMPLE 5 — Cross-company: which companies share a risk driver:
-MATCH (rd:RiskDriver)<-[:CAUSED_BY]-(rf:RiskFactor)<-[:HAS_RISK]-(c:Company)
-WHERE toLower(rd.name) CONTAINS toLower($topic)
-RETURN c.name, count(rf) AS exposure
-ORDER BY exposure DESC LIMIT 20
-
-EXAMPLE 6 — What competitors a company mentions:
+EXAMPLE 7 — What competitors a company mentions:
 MATCH (c:Company)-[:COMPETES_WITH]->(comp:Competitor)
-WHERE toLower(c.name) CONTAINS "amazon"
-RETURN comp.name, count(*) AS mentions
+WHERE c.cik = "1018724"
+RETURN comp.name AS competitor, count(*) AS mentions
 ORDER BY mentions DESC LIMIT 20
 
-EXAMPLE 7 — Node count overview (useful to check what's in graph):
+EXAMPLE 8 — Companies with China/tariff exposure (cross-company):
+MATCH (c:Company)-[:OPERATES_IN]->(g:GeographicMarket)
+WHERE toLower(g.name) CONTAINS "china"
+RETURN c.name AS company, c.ticker AS ticker, collect(DISTINCT g.name) AS markets
+ORDER BY company LIMIT 50
+
+EXAMPLE 9 — Node count overview:
 MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC
 
-EXAMPLE 8 — Companies in the graph with filings:
-MATCH (c:Company)<-[:FILED_BY]-(f:Filing)
-RETURN c.name, c.ticker, count(f) AS filing_count
-ORDER BY filing_count DESC LIMIT 30
+EXAMPLE 10 — Business description section text retrieval (for narrative questions):
+MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+WHERE c.cik = "1318605" AND fy.year = 2022
+MATCH (f)-[:HAS_SECTION]->(sec:Section)
+WHERE sec.section_type = "business"
+RETURN c.name AS company, fy.year AS year, sec.accession AS accession, sec.word_count AS words
+
+EXAMPLE 11 — Risk factor section retrieval (LLM nodes absent — use Section lookup):
+MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear)
+WHERE c.cik = "1318605" AND fy.year = 2022
+MATCH (f)-[:HAS_SECTION]->(sec:Section)
+WHERE sec.section_type = "risk_factors"
+RETURN c.name AS company, fy.year AS year, sec.accession AS accession, sec.word_count AS words
+
+EXAMPLE 12 — FinancialMetric for a company in a year:
+MATCH (fm:FinancialMetric)
+WHERE fm.cik = "1318605" AND fm.as_of_year = 2022
+RETURN fm.name AS metric, fm.direction, fm.as_of_year AS year
+LIMIT 30
 """
 
 # ── Router prompt ─────────────────────────────────────────────────────────────
@@ -143,18 +174,27 @@ Example queries:
 Task: Write a Cypher query to answer this question.
 Intent: {intent}
 Company: {company}
+CIK: {cik}
 Years: {years}
 Topic: {topic}
 Hint: {cypher_hint}
 Question: {question}
 
 Rules:
-- Use toLower() + CONTAINS for company/market name matching (names are upper case in graph)
-- Use OPTIONAL MATCH for nodes that may not exist (RiskFactor, RiskDriver etc.)
+- COMPANY MATCHING: if cik is not "any", use WHERE c.cik = "{cik}" — exact, no fuzzy needed.
+  Only use toLower(c.name) CONTAINS when cik is "any" and name is provided.
+- YEAR FILTERING: Filing has NO fiscal_year property. Always join:
+  MATCH (f:Filing)-[:FILED_IN]->(fy:FiscalYear) WHERE fy.year >= {year_from} AND fy.year <= {year_to}
+  For ManagementOutlook/FinancialMetric/Section year filtering, join via accession:
+  MATCH (f:Filing) WHERE f.accession_number = mo.accession
+  MATCH (f)-[:FILED_IN]->(fy:FiscalYear) WHERE fy.year = {year_from}
+- ManagementOutlook text is in mo.text (NOT mo.summary — that property does not exist)
+- FinancialMetric year is in fm.as_of_year (NOT fm.fiscal_year)
+- Section accession is sec.accession (links to Filing.accession_number)
+- Use OPTIONAL MATCH for LLM-only nodes (RiskFactor, RiskDriver, Product, BusinessSegment)
 - ALWAYS include c.name AS company in RETURN so results can be attributed to a company
 - Use collect(DISTINCT ...) to group related values onto one row per company
 - Return at most 50 rows (use LIMIT 50)
-- If years are given, filter: WHERE f.fiscal_year >= {year_from} AND f.fiscal_year <= {year_to}
 - Output ONLY the Cypher query, nothing else
 """
 

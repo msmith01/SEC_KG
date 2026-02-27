@@ -12,6 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import config
+from neo4j import GraphDatabase
 from models.llm_client import LLMClient
 from chatbot.memory import ConversationState
 from chatbot.prompts import ROUTER_SYSTEM, ROUTER_TEMPLATE
@@ -39,6 +40,13 @@ _TICKER_MAP = _load_ticker_map()
 class Router:
     def __init__(self, llm: LLMClient):
         self.llm = llm
+        try:
+            self._driver = GraphDatabase.driver(
+                config.NEO4J_URI,
+                auth=(config.NEO4J_USER, config.NEO4J_PASSWORD),
+            )
+        except Exception:
+            self._driver = None
 
     def route(self, question: str, state: ConversationState) -> dict:
         """
@@ -93,10 +101,52 @@ class Router:
         if not company:
             return routing
         upper = company.upper().strip()
-        # Direct ticker match
+
+        # Step 1: ticker CSV → CIK
         if upper in _TICKER_MAP:
             routing["cik"] = _TICKER_MAP[upper]
+
+        # Step 2: Neo4j canonical lookup — snap to exact graph name + CIK
+        resolved = self._neo4j_resolve(company, routing.get("cik"))
+        if resolved:
+            canonical_name, cik = resolved
+            routing["company"] = canonical_name
+            routing["cik"] = cik
+
         return routing
+
+    def _neo4j_resolve(self, term: str, cik: str | None) -> tuple[str, str] | None:
+        """Look up canonical company name and CIK from Neo4j.
+        Tries CIK first (exact), then ticker, then name CONTAINS.
+        Returns (canonical_name, cik) or None.
+        """
+        if not self._driver:
+            return None
+        try:
+            with self._driver.session(database=config.NEO4J_DATABASE) as s:
+                # Prefer exact CIK match if we already have one
+                if cik:
+                    rows = list(s.run(
+                        "MATCH (c:Company) WHERE c.cik = $cik "
+                        "RETURN c.name AS name, c.cik AS cik LIMIT 1",
+                        cik=str(cik)
+                    ))
+                    if rows:
+                        return rows[0]["name"], rows[0]["cik"]
+                # Fall back to ticker or name CONTAINS
+                rows = list(s.run(
+                    "MATCH (c:Company) "
+                    "WHERE toLower(c.ticker) = toLower($term) "
+                    "   OR toLower(c.name) CONTAINS toLower($term) "
+                    "RETURN c.name AS name, c.cik AS cik "
+                    "ORDER BY c.name LIMIT 1",
+                    term=term
+                ))
+                if rows:
+                    return rows[0]["name"], rows[0]["cik"]
+        except Exception:
+            pass
+        return None
 
     def _fill_from_context(self, routing: dict, state: ConversationState) -> dict:
         """If router left company/years blank, use active context."""

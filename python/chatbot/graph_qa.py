@@ -50,14 +50,17 @@ class GraphQA:
 
         rows = self._execute(cypher)
 
-        # If nothing came back or the query errored, fetch a quick overview so
-        # the synthesiser knows what IS in the graph
-        has_error = rows and rows[0].get("error")
-        if not rows or has_error:
-            overview = self._execute(
-                "MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC"
-            )
-            return cypher, [{"_overview": True, **r} for r in overview]
+        # On error: retry once with LLM fix
+        if rows and rows[0].get("error"):
+            fixed = self._fix_cypher(cypher, rows[0]["error"])
+            if fixed:
+                rows = self._execute(fixed)
+                cypher = fixed
+
+        # On empty results: try to explain what IS available for this company/year
+        if not rows or (rows and rows[0].get("error")):
+            fallback = self._diagnostic_fallback(routing)
+            return cypher, fallback
 
         return cypher, rows
 
@@ -73,6 +76,7 @@ class GraphQA:
             examples=CYPHER_EXAMPLES,
             intent=routing.get("intent", ""),
             company=routing.get("company") or "any",
+            cik=routing.get("cik") or "any",
             years=f"{year_from}–{year_to}" if years else "any",
             topic=routing.get("topic") or "any",
             cypher_hint=routing.get("cypher_hint", ""),
@@ -84,6 +88,52 @@ class GraphQA:
         raw = self.llm.complete(prompt, system=CYPHER_SYSTEM)
         cypher = self._clean_cypher(raw)
         return cypher if self._is_safe(cypher) else None
+
+    def _fix_cypher(self, cypher: str, error: str) -> str | None:
+        """Ask the LLM to fix a broken Cypher query. Returns fixed query or None."""
+        prompt = (
+            f"This Cypher query failed with an error:\n\n"
+            f"Query:\n{cypher}\n\n"
+            f"Error: {error}\n\n"
+            f"Fix the query. Output only the corrected Cypher, nothing else."
+        )
+        raw = self.llm.complete(prompt, system=CYPHER_SYSTEM)
+        fixed = self._clean_cypher(raw)
+        return fixed if fixed and self._is_safe(fixed) and fixed != cypher else None
+
+    def _diagnostic_fallback(self, routing: dict) -> list[dict]:
+        """When the main query returns nothing, return targeted diagnostic info.
+        If we know the company, show which years they have filings for.
+        Otherwise fall back to a graph-wide node count overview.
+        """
+        cik = routing.get("cik")
+        company = routing.get("company")
+
+        if cik:
+            # Show what years this specific company has in the graph
+            years_rows = self._execute(
+                "MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear) "
+                f"WHERE c.cik = '{cik}' "
+                "RETURN c.name AS company, c.ticker AS ticker, "
+                "collect(DISTINCT fy.year) AS available_years"
+            )
+            if years_rows and not years_rows[0].get("error"):
+                return [{"_diagnostic": True, "_type": "available_years", **r} for r in years_rows]
+        elif company:
+            years_rows = self._execute(
+                "MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear) "
+                f"WHERE toLower(c.name) CONTAINS toLower('{company}') "
+                "RETURN c.name AS company, c.ticker AS ticker, "
+                "collect(DISTINCT fy.year) AS available_years"
+            )
+            if years_rows and not years_rows[0].get("error"):
+                return [{"_diagnostic": True, "_type": "available_years", **r} for r in years_rows]
+
+        # No company — generic overview
+        overview = self._execute(
+            "MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC"
+        )
+        return [{"_overview": True, **r} for r in overview]
 
     def _clean_cypher(self, raw: str) -> str:
         """Strip markdown fences and whitespace."""
@@ -117,10 +167,23 @@ def format_graph_rows(rows: list[dict]) -> str:
     if rows and rows[0].get("error"):
         return f"(graph query error: {rows[0]['error']})"
 
-    overview_rows = [r for r in rows if r.get("_overview")]
-    data_rows     = [r for r in rows if not r.get("_overview")]
+    overview_rows    = [r for r in rows if r.get("_overview")]
+    diagnostic_rows  = [r for r in rows if r.get("_diagnostic")]
+    data_rows        = [r for r in rows if not r.get("_overview") and not r.get("_diagnostic")]
 
     lines = []
+
+    if diagnostic_rows:
+        dtype = diagnostic_rows[0].get("_type")
+        if dtype == "available_years":
+            lines.append("No results found for that query. Available data for this company:")
+            for r in diagnostic_rows:
+                company = r.get("company", "?")
+                ticker  = r.get("ticker", "")
+                years   = sorted(r.get("available_years") or [])
+                years_str = ", ".join(str(y) for y in years) if years else "none"
+                lines.append(f"  {company} ({ticker}): filings available for years {years_str}")
+
     if overview_rows:
         lines.append("Graph currently contains:")
         for r in overview_rows:
