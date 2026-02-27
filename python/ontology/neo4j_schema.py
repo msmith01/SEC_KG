@@ -32,6 +32,44 @@ from ontology.nodes import (
 from ontology.relations import Edge
 
 
+# ── Relation endpoint labels ───────────────────────────────────────────────────
+#
+# Maps each RelationType value → (source_label, target_label).
+# Used in write_document to add label hints to MATCH patterns so that
+# Neo4j can use the per-label uniqueness-constraint indexes instead of
+# doing a full node_id scan across all labels.
+
+_REL_LABELS: dict[str, tuple[str, str]] = {
+    "FILED_BY":        ("Filing",            "Company"),
+    "HAS_SECTION":     ("Filing",            "Section"),
+    "FILED_IN":        ("Filing",            "FiscalYear"),
+    "PRECEDES":        ("FiscalYear",        "FiscalYear"),
+    "HAS_SEGMENT":     ("Company",           "BusinessSegment"),
+    "OFFERS":          ("Company",           "Product"),
+    "OPERATES_IN":     ("Company",           "GeographicMarket"),
+    "TARGETS":         ("Company",           "CustomerSegment"),
+    "COMPETES_WITH":   ("Company",           "Competitor"),
+    "SUBJECT_TO":      ("Company",           "Regulation"),
+    "INCLUDES":        ("BusinessSegment",   "Product"),
+    "HAS_RISK":        ("Company",           "RiskFactor"),
+    "CAUSED_BY":       ("RiskFactor",        "RiskDriver"),
+    "MAY_RESULT_IN":   ("RiskFactor",        "RiskConsequence"),
+    "MITIGATED_BY":    ("RiskFactor",        "Mitigation"),
+    "RELATED_TO":      ("RiskFactor",        "RiskFactor"),
+    "SUPERSEDES":      ("RiskFactor",        "RiskFactor"),
+    "REPORTS":         ("Company",           "FinancialMetric"),
+    "ATTRIBUTED_TO":   ("FinancialMetric",   "BusinessSegment"),
+    "DRIVEN_BY":       ("FinancialMetric",   "Driver"),
+    "IMPACTED_BY":     ("FinancialMetric",   "MacroFactor"),
+    "HAS_OUTLOOK":     ("Company",           "ManagementOutlook"),
+    "REFERENCES":      ("ManagementOutlook", "FinancialMetric"),
+    "AFFECTS":         ("RiskFactor",        "BusinessSegment"),
+    "MATERIALISED_AS": ("RiskFactor",        "FinancialMetric"),
+    "CITED_IN":        ("MacroFactor",       "RiskFactor"),
+    "REPORTED_IN":     ("BusinessSegment",   "FinancialMetric"),
+}
+
+
 # ── Constraint / index definitions ────────────────────────────────────────────
 #
 # Each tuple: (node_label, property_name)
@@ -117,6 +155,31 @@ class Neo4jGraph:
         print(f"[neo4j] Schema applied: "
               f"{len(UNIQUENESS_CONSTRAINTS)} constraints, "
               f"{len(ADDITIONAL_INDEXES)} indexes.")
+        self.setup_fiscal_years()
+
+    def setup_fiscal_years(self, start: int = 1993, end: int = 2027) -> None:
+        """
+        Pre-create all FiscalYear nodes and PRECEDES chain for years [start, end].
+
+        Called once during schema setup and again before a parallel run.
+        Pre-creating these nodes eliminates the most common source of deadlock
+        in parallel KG population: concurrent MERGE on the PRECEDES relationship
+        locks both FiscalYear endpoints simultaneously across all workers.
+        """
+        with self._driver.session(database=self._database) as session:
+            for year in range(start, end + 1):
+                session.run(
+                    "MERGE (n:FiscalYear {node_id: $id}) SET n.year = $year",
+                    id=f"fy_{year}", year=year,
+                )
+            for year in range(start, end):
+                session.run(
+                    "MATCH (prev:FiscalYear {node_id: $prev_id}) "
+                    "MATCH (curr:FiscalYear {node_id: $curr_id}) "
+                    "MERGE (prev)-[:PRECEDES]->(curr)",
+                    prev_id=f"fy_{year}", curr_id=f"fy_{year + 1}",
+                )
+        print(f"[neo4j] FiscalYear nodes {start}–{end} and PRECEDES chain ready.")
 
     # ── Node upsert ───────────────────────────────────────────────────────────
 
@@ -182,17 +245,32 @@ class Neo4jGraph:
 
         with self._driver.session(database=self._database) as session:
             for rel_type, rel_edges in by_type.items():
-                cypher = (
-                    f"UNWIND $batch AS row "
-                    f"MATCH (a {{node_id: row.subject_id}}) "
-                    f"MATCH (b {{node_id: row.object_id}}) "
-                    f"MERGE (a)-[r:{rel_type}]->(b) "
-                    f"SET r.as_of_year  = row.as_of_year, "
-                    f"    r.confidence  = row.confidence, "
-                    f"    r.filing_ref  = row.filing_ref, "
-                    f"    r.sentence_id = row.sentence_id, "
-                    f"    r.weight      = row.weight"
-                )
+                labels = _REL_LABELS.get(rel_type)
+                if labels:
+                    src_lbl, tgt_lbl = labels
+                    cypher = (
+                        f"UNWIND $batch AS row "
+                        f"MATCH (a:{src_lbl} {{node_id: row.subject_id}}) "
+                        f"MATCH (b:{tgt_lbl} {{node_id: row.object_id}}) "
+                        f"MERGE (a)-[r:{rel_type}]->(b) "
+                        f"SET r.as_of_year  = row.as_of_year, "
+                        f"    r.confidence  = row.confidence, "
+                        f"    r.filing_ref  = row.filing_ref, "
+                        f"    r.sentence_id = row.sentence_id, "
+                        f"    r.weight      = row.weight"
+                    )
+                else:
+                    cypher = (
+                        f"UNWIND $batch AS row "
+                        f"MATCH (a {{node_id: row.subject_id}}) "
+                        f"MATCH (b {{node_id: row.object_id}}) "
+                        f"MERGE (a)-[r:{rel_type}]->(b) "
+                        f"SET r.as_of_year  = row.as_of_year, "
+                        f"    r.confidence  = row.confidence, "
+                        f"    r.filing_ref  = row.filing_ref, "
+                        f"    r.sentence_id = row.sentence_id, "
+                        f"    r.weight      = row.weight"
+                    )
                 batch = [
                     {
                         "subject_id":  e.subject_id,
@@ -216,7 +294,10 @@ class Neo4jGraph:
     ) -> tuple[int, int]:
         """
         Write all nodes, edges, and FiscalYear wiring for one document in a
-        single session — eliminates per-call session overhead.
+        single explicit transaction — eliminates per-call session overhead and
+        allows the Neo4j driver to retry automatically on TransientError
+        (deadlock), which can occur when multiple workers MERGE shared nodes
+        (Company, FiscalYear) concurrently.
         Returns (nodes_written, edges_written).
         """
         fy_id   = f"fy_{fiscal_year}"
@@ -234,37 +315,40 @@ class Neo4jGraph:
                     batch=batch,
                 )
 
-            # Edges — one UNWIND per relation type
-            # MERGE on (a, rel_type, b) only — no filing_ref in merge key so
-            # the graph has at most one edge per pair (cleaner for analytics).
-            # as_of_year / confidence are updated on each encounter.
+            # Edges — one UNWIND per relation type, with label hints so Neo4j
+            # uses the per-label uniqueness-constraint indexes instead of
+            # scanning all nodes by node_id.
             for rel_type, batch in edges_by_type.items():
-                session.run(
-                    f"UNWIND $batch AS row "
-                    f"MATCH (a {{node_id: row.subject_id}}) "
-                    f"MATCH (b {{node_id: row.object_id}}) "
-                    f"MERGE (a)-[r:{rel_type}]->(b) "
-                    f"SET r.as_of_year  = row.as_of_year, "
-                    f"    r.confidence  = row.confidence, "
-                    f"    r.filing_ref  = row.filing_ref, "
-                    f"    r.sentence_id = row.sentence_id, "
-                    f"    r.weight      = row.weight",
-                    batch=batch,
-                )
-
-            # FiscalYear node + PRECEDES chain
-            session.run(
-                "MERGE (n:FiscalYear {node_id: $fy_id}) SET n.year = $year",
-                fy_id=fy_id, year=fiscal_year,
-            )
-            session.run(
-                "MATCH (prev:FiscalYear {node_id: $prev_id}) "
-                "MATCH (curr:FiscalYear {node_id: $curr_id}) "
-                "MERGE (prev)-[:PRECEDES]->(curr)",
-                prev_id=prev_id, curr_id=fy_id,
-            )
+                labels = _REL_LABELS.get(rel_type)
+                if labels:
+                    src_lbl, tgt_lbl = labels
+                    cypher = (
+                        f"UNWIND $batch AS row "
+                        f"MATCH (a:{src_lbl} {{node_id: row.subject_id}}) "
+                        f"MATCH (b:{tgt_lbl} {{node_id: row.object_id}}) "
+                        f"MERGE (a)-[r:{rel_type}]->(b) "
+                        f"SET r.as_of_year  = row.as_of_year, "
+                        f"    r.confidence  = row.confidence, "
+                        f"    r.filing_ref  = row.filing_ref, "
+                        f"    r.sentence_id = row.sentence_id, "
+                        f"    r.weight      = row.weight"
+                    )
+                else:
+                    cypher = (
+                        f"UNWIND $batch AS row "
+                        f"MATCH (a {{node_id: row.subject_id}}) "
+                        f"MATCH (b {{node_id: row.object_id}}) "
+                        f"MERGE (a)-[r:{rel_type}]->(b) "
+                        f"SET r.as_of_year  = row.as_of_year, "
+                        f"    r.confidence  = row.confidence, "
+                        f"    r.filing_ref  = row.filing_ref, "
+                        f"    r.sentence_id = row.sentence_id, "
+                        f"    r.weight      = row.weight"
+                    )
+                session.run(cypher, batch=batch)
 
             # Filing → FiscalYear edge
+            # FiscalYear nodes are pre-created by setup_fiscal_years().
             session.run(
                 "MATCH (f:Filing {node_id: $acc}) "
                 "MATCH (fy:FiscalYear {node_id: $fy_id}) "

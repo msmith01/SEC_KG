@@ -1,6 +1,6 @@
 # SEC Knowledge Graph — Task Tracker
 
-Last updated: **2026-02-25 22:30** (end of session)
+Last updated: **2026-02-27 14:30** (resumed after power cut)
 
 ### Status key
 | Symbol | Meaning |
@@ -100,7 +100,7 @@ Last updated: **2026-02-25 22:30** (end of session)
 | O-6 | `kg_population/ner_extractor.py` — spaCy fast extractor | ✅ | 2026-02-19 | 2026-02-19 | No GPU needed; some NER noise (ORG false positives) |
 | O-7 | Checkpoint system (`.checkpoint.json`) | ✅ | 2026-02-19 | 2026-02-19 | Per-document; restarts skip already-done sections |
 | O-8 | Ollama retry / `keep_alive=-1` fix | ✅ | 2026-02-19 | 2026-02-19 | Exponential backoff; prevents VRAM eviction |
-| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Restarted unthrottled after Neo4j wipe + recovery (2026-02-25). PID 16538; log: `logs/kg_population_throttled.log`; ~862/55,600 as of 22:00; ~1–2s/doc; est. 15–20h |
+| O-9 | **KG population (fast/spaCy) — full corpus** | 🔄 | 2026-02-24 | — | Restarted after power cut (2026-02-27). Using `run_kg_parallel.py --workers 12` (~10 docs/s, 55x speedup). Log: `logs/kg_parallel_resume.log`; ~35,943/55,600 (64.6%) as of 14:30; ~77 min remaining. |
 | O-10 | **LLM-mode KG re-population** | ⚠️ | — | — | Blocked on GPU; will replace spaCy NER noise with higher-quality entities |
 | O-11 | **KG pipeline performance optimisation** | ✅ | 2026-02-24 | 2026-02-24 | 3-4x speedup: (1) `nlp.pipe(batch_size=64)` instead of per-sentence calls; (2) `write_document()` — single Neo4j session per doc; (3) edge `MERGE (a)-[r:TYPE]->(b)` without `filing_ref` in key — eliminates multigraph buildup; (4) checkpoint every 50 docs. Committed `2906cb5`. Graph wiped + restarted clean. |
 | O-12 | **KG OOM crash fix — lazy document loading** | ✅ | 2026-02-24 | 2026-02-24 | Old code loaded all 55,600 JSON docs into RAM at startup (~40 GB → OOM kill after ~4h). Fixed: one doc loaded per iteration, previous doc GC'd. Fast section_id scan reads only first 100 bytes per file (8x faster). Committed `7ff22f5`. |
@@ -110,6 +110,22 @@ Last updated: **2026-02-25 22:30** (end of session)
 | C-2 | **Chatbot — Phase 2 (conversation quality)** | 📋 | — | — | Co-ref resolution, company alias matching, Cypher error recovery, session persistence |
 | C-3 | **Chatbot — Phase 3 (UI + graph viz)** | 📋 | — | — | pyvis graph panel, context chips, export to markdown |
 | C-4 | **Chatbot — Phase 4 (cross-company + trend)** | 📋 | — | — | Needs LLM-mode RiskFactor nodes; trend queries, sector comparison |
+
+---
+
+## 8-K Data Collection
+
+| # | Task | Status | Started | Completed | Notes |
+|---|------|--------|---------|-----------|-------|
+| K-1 | `get_8k_documents.R` — raw 8-K text downloader | ✅ | 2026-02-27 | 2026-02-27 | Downloads raw filing text to `edgar_8K/<year>/`; `--year/--offset/--limit/--max-per-company` args; resumable |
+| K-2 | `get_8k_items.R` — structured event extractor | ✅ | 2026-02-27 | 2026-02-27 | Uses `get8KItems()` to parse triggered event items (e.g. 1.01, 5.02); outputs `edgar_8K_items/<year>/events_<year>.csv`; batched (50 CIKs/call); resumable via checkpoint |
+| K-3 | `run_parallel_8k.sh` — two-pass parallel runner | ✅ | 2026-02-27 | 2026-02-27 | Pass 1 = raw download (parallel workers); Pass 2 = structured events (parallel workers); Pass 2 gated on Pass 1 success |
+| K-4 | `run_all_years_8k.sh` — multi-year orchestrator | ✅ | 2026-02-27 | 2026-02-27 | Runs years 2014–2024 in batches of 3 concurrent years × 4 workers; logs to `logs/8k_all_years.log` |
+| K-5 | **8-K collection 2014–2024** | 🔄 | 2026-02-27 | — | PID 70695; currently on batch 2014/2015/2016; log: `logs/8k_all_years.log`; monitor: `tail -f logs/8k_all_years.log` |
+| K-6 | **8-K KG integration (preprocessing)** | 📋 | — | — | Add 8-K pipeline stage: preprocess raw `edgar_8K/<year>/` text files through existing `preprocessing/` pipeline → `SectionDocument` JSON; needs new `section_type = "8k"` |
+| K-7 | **8-K KG integration (ontology)** | 📋 | — | — | New node types: `Event8K` (triggered item code + description), `MaterialAgreement`, `ExecutiveChange`, `EarningsGuidance` etc.; link to `Filing` and `Company` nodes |
+| K-8 | **8-K structured events → KG** | 📋 | — | — | Ingest `events_<year>.csv` directly: create `Event8K` nodes from item codes (no LLM needed); link `(Filing)-[:HAS_EVENT]->(Event8K)`. Fast, high-signal. |
+| K-9 | **Cross-filing event timeline** | 📋 | — | — | Once K-7/K-8 done: Cypher queries to reconstruct event timelines per company (CEO changes, acquisitions, guidance cuts) across years |
 
 ---
 
@@ -149,47 +165,48 @@ Last updated: **2026-02-25 22:30** (end of session)
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-END OF SESSION: 2026-02-25 ~22:30
+SESSION STATE: 2026-02-27 ~22:10
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-WHAT IS RUNNING OVERNIGHT (do not kill these):
-  PID 16538 — KG population (--fast, unthrottled)
-              951/55,600 checkpointed at session end
-              log: logs/kg_population_throttled.log
-  PID 22221 — Streamlit chatbot (port 8501)
-              log: logs/chatbot.log
-  Docker    — neo4j-sec (up, clean DB, wiped + rebuilt tonight)
+WHAT IS RUNNING:
+  run_kg_parallel.py --workers 12
+              92.8% done (51,593/55,600) — restarted PID 64259
+              log: logs/kg_parallel_resume.log
+  neo4j-sec — Docker container up
+  Chatbot   — PID 64476, http://192.168.1.39:8501, log: logs/chatbot.log
+  8-K pipeline 2014–2024 — PID 70695
+              Currently: batch 2014/2015/2016
+              log: logs/8k_all_years.log
+              Monitor: tail -f logs/8k_all_years.log
 
-WHAT IS NOT RUNNING (needs manual start tomorrow):
-  1. R collection 2023: bash run_parallel_collection.sh 2023 4 > logs/collection_2023.log 2>&1 &
-  2. R collection 2024: bash run_parallel_collection.sh 2024 4 > logs/collection_2024.log 2>&1 &
-  3. Glossary rebuild:  python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
+WHAT IS NOT RUNNING (start these next session if still pending):
+  1. R collection 2023 (stalled — needs restart):
+       nohup bash run_parallel_collection.sh 2023 4 > logs/collection_2023_resume.log 2>&1 &
+  2. R collection 2024 (stalled — needs restart):
+       nohup bash run_parallel_collection.sh 2024 4 > logs/collection_2024_resume.log 2>&1 &
+  3. Glossary rebuild:
+       nohup python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOMORROW — STEP BY STEP
+NEXT SESSION — STEP BY STEP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STEP 1 — Check overnight processes (5 min)
+STEP 1 — Check running processes (5 min)
   # Is KG population still alive?
-  ps aux | grep kg_population | grep -v grep
-  tail -5 logs/kg_population_throttled.log
-  python3 -c "import json; d=json.load(open('python/data/kg_export/.checkpoint.json')); print(len(d), '/ ~55600')"
-
+  python3 python/run_kg_parallel.py --status
+  ps aux | grep run_kg_parallel | grep -v grep
   # If dead, restart:
-  nohup python3 python/run_kg_population.py --fast > logs/kg_population_throttled.log 2>&1 &
+  nohup python3 python/run_kg_parallel.py --workers 12 > logs/kg_parallel_resume.log 2>&1 &
 
   # Is Neo4j up?
   docker ps --filter name=neo4j-sec --format "{{.Status}}"
-  # If down: docker start neo4j-sec
+  # If down: docker start neo4j-sec (wait ~15s for recovery, then verify bolt connectivity)
 
   # Is chatbot up?
   ps aux | grep streamlit | grep -v grep
   # If down: nohup streamlit run python/chatbot/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true > logs/chatbot.log 2>&1 &
 
-STEP 2 — Start the things that weren't running (5 min)
-  bash run_parallel_collection.sh 2023 4 > logs/collection_2023.log 2>&1 &
-  bash run_parallel_collection.sh 2024 4 > logs/collection_2024.log 2>&1 &
-  python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
+STEP 2 — Start anything still not running (see "WHAT IS NOT RUNNING" above)
 
 STEP 3 — Test the chatbot (10 min)
   Open: http://192.168.1.39:8501
@@ -201,36 +218,52 @@ STEP 3 — Test the chatbot (10 min)
   Check: do answers cite sources? Is the Cypher expandable? Does context carry between turns?
 
 STEP 4 — Chatbot Phase 2 improvements (main dev work)
-  Issues likely found in Step 3:
-    a. Company name resolution — graph has UPPER CASE names, user types natural case.
-       Fix in router.py: after LLM routing, do a fuzzy MATCH against Company nodes in Neo4j
-       to resolve "Tyson" → "TYSON FOODS INC".
-    b. Cypher error recovery — if Neo4j rejects the generated query, ask the LLM to fix it
-       once before returning empty results. Add to graph_qa.py.
-    c. "No results" messaging — when graph is sparse (only ~1-3% populated), the synthesiser
-       should always explain what IS in the graph instead of just saying "no data found".
-       Already partially handled by the _overview fallback in graph_qa.py — verify it works.
-    d. Session persistence — save conversation to JSON file so it survives chatbot restarts.
-       Add to memory.py: save_to_file() / load_from_file().
+  a. Company name resolution
+       Problem: graph stores names in UPPER CASE (e.g. "TYSON FOODS INC"); user types natural case.
+       Fix: in router.py, after LLM extracts company name, do a case-insensitive fuzzy MATCH
+       against Company nodes in Neo4j to resolve "Tyson" → "TYSON FOODS INC" before querying.
+       Cypher: MATCH (c:Company) WHERE toLower(c.name) CONTAINS toLower($term) RETURN c.name LIMIT 5
 
-STEP 5 — Chatbot Phase 3: graph visualisation panel (optional, if time)
+  b. Cypher error recovery
+       Problem: LLM-generated Cypher sometimes has syntax errors or references non-existent properties.
+       Fix: in graph_qa.py, wrap the Neo4j execute call in try/except; on failure, send the
+       error message + original Cypher back to the LLM with "Fix this Cypher:" and retry once.
+
+  c. "No results" messaging
+       Problem: when the graph is sparse (KG population still in progress), blank answers confuse users.
+       Fix: verify the _overview fallback in graph_qa.py fires correctly. It should always return
+       a count of nodes/edges in the graph so the synthesiser can say "the graph currently has X
+       companies and Y filings" rather than "no data found".
+
+  d. Session persistence
+       Problem: conversation history is lost when the chatbot process restarts.
+       Fix: in memory.py, add save_to_file(path) and load_from_file(path) methods that serialise
+       the conversation list to JSON. Call save on every new turn; call load at startup.
+
+STEP 5 — Chatbot Phase 3: graph visualisation panel (optional)
   Add pyvis subgraph rendering to app.py.
   After each answer, extract node IDs from graph_rows and render a pyvis HTML component
   showing the subgraph of entities referenced in the answer.
   See CHATBOT_DESIGN.md Phase 3 section for details.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BIGGER PICTURE — after KG population completes (~15-20h from session end)
+BIGGER PICTURE — after KG population (O-9) completes
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Once O-9 finishes:
-  - Run LLM-mode KG population for a target company set (e.g. S&P 500 subset):
-      python3 python/run_kg_population.py --section risk_factors
-    This adds RiskFactor, RiskDriver, RiskConsequence, Mitigation nodes —
-    unlocking the most valuable chatbot query types.
-  - Start 1993-2014 historical collection:
-      bash run_smart_collection.sh 1993 2014 4 6
-  - Graph quality audit (E-4): Cypher queries to identify spaCy false-positive Competitor nodes
-  - Cross-year semantic linking (E-1): SUPERSEDES edges between same risk across years
+  1. Run LLM-mode KG population for a target company set (e.g. S&P 500 subset):
+       python3 python/run_kg_population.py --section risk_factors
+     This adds RiskFactor, RiskDriver, RiskConsequence, Mitigation nodes —
+     unlocking the highest-value chatbot query types (supply chain risk, tariff exposure, etc.)
+
+  2. Start 1993-2014 historical R collection:
+       bash run_smart_collection.sh 1993 2014 4 6
+
+  3. Graph quality audit (E-4): Cypher to flag spaCy false-positive Competitor/ORG nodes; dedup pass.
+
+  4. Cross-year semantic linking (E-1): PERSISTED_TO / EMERGED_IN / RESOLVED_IN edges between
+     RiskFactor nodes across years using sentence embedding similarity.
+
+  5. Back up raw SEC documents to S3 / Google Drive
+     (edgar_Filings/, edgar_RiskFactors/, edgar_BusinDescr/, edgar_MgmtDisc/, preprocessed JSON)
 ```
 
 ## Log Locations

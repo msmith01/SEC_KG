@@ -56,7 +56,15 @@ with st.sidebar:
 
     page = st.radio(
         "Page",
-        ["Chat", "Dataset Statistics"],
+        [
+            "Chat",
+            "Dataset Statistics",
+            "Semantic Search",
+            "Company Profile",
+            "Geographic Exposure",
+            "Sentiment Tracker",
+            "Company Comparison",
+        ],
         label_visibility="collapsed",
     )
 
@@ -96,10 +104,35 @@ with st.sidebar:
             st.session_state["prefill"] = ex
 
 
-# ── Stats page ────────────────────────────────────────────────────────────────
+# ── Non-chat pages ────────────────────────────────────────────────────────────
 if page == "Dataset Statistics":
     from chatbot.stats_page import render_stats
     render_stats()
+    st.stop()
+
+if page == "Semantic Search":
+    from chatbot.page_semantic_search import render_semantic_search
+    render_semantic_search()
+    st.stop()
+
+if page == "Company Profile":
+    from chatbot.page_company_profile import render_company_profile
+    render_company_profile()
+    st.stop()
+
+if page == "Geographic Exposure":
+    from chatbot.page_geo_heatmap import render_geo_heatmap
+    render_geo_heatmap()
+    st.stop()
+
+if page == "Sentiment Tracker":
+    from chatbot.page_sentiment_tracker import render_sentiment_tracker
+    render_sentiment_tracker()
+    st.stop()
+
+if page == "Company Comparison":
+    from chatbot.page_comparison import render_comparison
+    render_comparison()
     st.stop()
 
 
