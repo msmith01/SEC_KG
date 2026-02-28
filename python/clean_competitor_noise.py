@@ -27,79 +27,132 @@ NEO4J_PASSWORD = "password"
 # Blocklist
 # ---------------------------------------------------------------------------
 
-# Exact-match names (case-insensitive)
+# Exact-match names (case-insensitive — stored uppercased, matched via name.upper())
 EXACT_BLOCKLIST = {
+    # Regulatory / standards bodies
     "SEC", "GAAP", "FASB", "IFRS", "IRS", "FINRA", "NYSE", "NASDAQ",
     "ASC", "ASU", "PCAOB", "AICPA", "CPA", "CFA",
+    "NIST", "USPTO", "FCA", "EEA", "CPRA", "ACA", "HIPAA",
+    "GDPR", "CCPA", "FCPA", "FCRA", "FDCPA", "ERISA",
+    "OSHA", "EPA", "FDA", "FTC", "DOJ", "DOD", "HHS", "CMS",
+    "FINRA", "OCC", "FDIC", "CFPB", "CFTC",
+    # Government programs
+    "MEDICARE", "MEDICAID",
+    # Legal entity suffixes
     "LLC", "LP", "LLP", "LTD", "INC", "CORP", "CO", "PLC",
-    "N/A", "NA", "UNRESOLVED", "UNKNOWN", "NONE",
-    "K", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+    "INC.", "L.P.", "L.L.C.", "N.A.",
+    # Placeholder / null values
+    "N/A", "NA", "UNRESOLVED", "UNKNOWN", "NONE", "N/A.", "TBD", "TBA",
+    # Single letters and very short noise
+    "K", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "L", "M",
+    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+    "AI", "ML", "IP", "IT", "HR", "PR", "IR",
+    # Geopolitical acronyms
     "EU", "US", "UK", "UN", "WHO", "WTO", "IMF", "GDP", "IPO",
-    "COVID-19", "COVID", "SARS", "SARS-CoV-2",
+    "G7", "G20", "NATO", "WEF",
+    # Health/pandemic
+    "COVID-19", "COVID", "SARS", "SARS-COV-2",
+    # Financial metrics & ratios
     "EBITDA", "EBIT", "EPS", "ROE", "ROI", "ROA",
-    "S&P", "S&P 500", "DOW", "DJIA",
-    "ACT", "LAW", "CODE", "RULE", "FORM",
+    "SG&A", "MD&A", "R&D", "CAPEX", "OPEX",
+    "ADJUSTED EBITDA", "ADJUSTED EBIT",
+    # Market indices
+    "S&P", "S&P 500", "DOW", "DJIA", "NASDAQ", "RUSSELL 2000",
+    # Generic document/form terms
+    "ACT", "LAW", "CODE", "RULE", "FORM", "ITEM",
+    # Generic business nouns (not specific companies)
     "COMPANY", "COMPANIES", "CORPORATION", "CORPORATIONS",
     "GROUP", "HOLDINGS", "PARTNERS", "VENTURES",
     "MANAGEMENT", "OPERATIONS", "SERVICES", "SOLUTIONS",
     "TECHNOLOGIES", "TECHNOLOGY", "SYSTEMS", "PRODUCTS",
     "INTERNATIONAL", "GLOBAL", "NATIONAL", "AMERICAN",
+    # Common adjectives/nouns spaCy mistakes for ORGs
+    "FAIR", "DIGITAL", "CORPORATE", "DIRECT", "MAXIMUM", "MINIMUM",
+    "BRANCH", "STATE", "MARKET", "CAPITAL", "EQUITY", "CREDIT",
+    "GROWTH", "RISK", "PERFORMANCE", "COMPLIANCE",
+    # Job titles
+    "CEO", "CFO", "COO", "CTO", "CIO", "CISO", "CSO", "CLO",
+    "CHAIRMAN", "DIRECTOR", "OFFICER", "COUNSEL",
+    # Common OCR / parse garbage
+    "MILEST1", "N1THELESS", "NONETHELESS", "HOWEVER",
 }
 
 # Substring / phrase matches (case-insensitive)
 PHRASE_BLOCKLIST = [
+    # Governance / committee boilerplate
     "board of directors",
     "general counsel",
+    "audit committee",
+    "compensation committee",
+    "nominating committee",
+    "governance committee",
+    "risk committee",
+    "beneficial owners",
+    # Regulatory bodies (full names)
     "securities and exchange commission",
     "financial accounting standards board",
     "public company accounting oversight",
     "internal revenue service",
-    "european union",
-    "european commission",
     "federal reserve",
     "department of justice",
     "department of defense",
+    "department of health",
+    "centers for medicare",
+    "food and drug administration",
+    "federal trade commission",
+    "consumer financial protection",
+    "office of the comptroller",
     "u.s. government",
     "u.s. congress",
     "u.s. senate",
     "u.s. house",
+    # International bodies
+    "european union",
+    "european commission",
+    "european economic area",
     "world health organization",
     "world trade organization",
+    # Form/filing navigation
+    "form s-3", "form s-1", "form s-4",
+    "form 10-k", "form 10-q", "form 8-k", "form 4",
+    "item 1a", "item 1b", "item 1", "item 2", "item 7",
+    "annual report", "quarterly report", "proxy statement",
+    "current reports",
+    "cybersecurity risk management",
     "off-balance sheet",
-    "form s-3",
-    "form 10-k",
-    "form 10-q",
-    "form 8-k",
-    "item 1a",
-    "item 1",
-    "item 7",
-    "annual report",
-    "proxy statement",
     "independent registered public accounting",
-    "audit committee",
-    "compensation committee",
-    "nominating committee",
-    "chief executive officer",
-    "chief financial officer",
-    "chief operating officer",
-    "president and ceo",
-    "vice president",
-    "general partner",
-    "limited partner",
-    "note payable",
-    "accounts receivable",
-    "accounts payable",
-    "income tax",
-    "net income",
-    "operating income",
-    "gross profit",
-    "total revenue",
-    "total assets",
-    "common stock",
-    "preferred stock",
-    "class a",
-    "class b",
-    "per share",
+    # Financial statement line items
+    "note payable", "notes payable",
+    "accounts receivable", "accounts payable",
+    "income tax", "net income", "operating income",
+    "gross profit", "total revenue", "total assets",
+    "common stock", "preferred stock",
+    "per share", "earnings per share",
+    "net interest", "interest income", "interest expense",
+    "capital resources", "capital expenditure",
+    "financial instruments", "financial statements",
+    "credit facility", "revolving credit",
+    "adjusted ebitda", "adjusted ebit",
+    "research and development",
+    "selling, general",
+    # Job titles
+    "chief executive officer", "chief financial officer",
+    "chief operating officer", "chief technology officer",
+    "chief information officer", "chief legal officer",
+    "president and ceo", "vice president",
+    "general partner", "limited partner",
+    "management's discussion", "management discussion",
+    # Accounting / legal concepts
+    "business combinations",
+    "intellectual property",
+    "anti kickback",
+    "stark law",
+    "affordable care act",
+    "class a", "class b", "class c",
+    # Generic / structural
+    "stock compensation",
+    "stock-based compensation",
+    "fair value",
 ]
 
 # Regex patterns matched against the full name
@@ -217,9 +270,11 @@ def pass2_singletons(driver, execute: bool):
     with driver.session() as s:
         count = s.run(
             "MATCH (c:Competitor) "
-            "WHERE size([(f)-[:COMPETES_WITH]->(c) | f]) <= 1 "
-            "RETURN count(c) AS n"
-        ).single()["n"]
+            "OPTIONAL MATCH (comp:Company)-[:COMPETES_WITH]->(c) "
+            "WITH c, count(DISTINCT comp) AS n "
+            "WHERE n <= 1 "
+            "RETURN count(c) AS total"
+        ).single()["total"]
 
     print(f"Singleton Competitor nodes (mentioned by ≤1 company): {count:,}")
 
@@ -234,13 +289,15 @@ def pass2_singletons(driver, execute: bool):
         with driver.session() as s:
             result = s.run(
                 "MATCH (c:Competitor) "
-                "WHERE size([(f)-[:COMPETES_WITH]->(c) | f]) <= 1 "
+                "OPTIONAL MATCH (comp:Company)-[:COMPETES_WITH]->(c) "
+                "WITH c, count(DISTINCT comp) AS n "
+                "WHERE n <= 1 "
                 "WITH c LIMIT $batch "
                 "DETACH DELETE c "
-                "RETURN count(c) AS n",
+                "RETURN count(c) AS deleted",
                 batch=batch,
             ).single()
-            n = result["n"] if result else 0
+            n = result["deleted"] if result else 0
         total_deleted += n
         print(f"  deleted {total_deleted:,} so far...", end="\r", flush=True)
         if n == 0:
