@@ -264,6 +264,80 @@ Until then, semantic search on the raw MDA text (ChromaDB) is a better substitut
 
 ---
 
+---
+
+## LLM-Mode Population — Missing Nodes (RiskFactor, RiskDriver, etc.)
+
+**Problem:** RiskFactor, RiskDriver, RiskConsequence, Mitigation, Product, BusinessSegment nodes are all
+empty. These require LLM-mode KG population (`run_kg_population.py` without `--fast`). They are the
+highest-value nodes for financial analysis — supply chain risk, tariff exposure, competitive threats.
+
+**Solution:** Run LLM-mode on a priority company subset, not the full 4,726.
+
+Recommended approach — tiered:
+
+1. **Tier 1 — S&P 500 subset (~500 companies, ~3,000 filings):**
+   ```bash
+   # Create a priority CIK list from the S&P 500 tickers in ticker_to_cik.csv
+   # Then run LLM-mode restricted to those CIKs:
+   nohup python3 python/run_kg_population.py --section risk_factors \
+     > logs/kg_llm_sp500_risk.log 2>&1 &
+   ```
+   This adds RiskFactor/RiskDriver nodes for the most-analysed companies.
+   Estimated runtime: ~8–12h overnight (Ollama, no GPU dependency).
+
+2. **Tier 2 — All collected companies (~4,726):**
+   Run after Tier 1 validates the pipeline. Use `run_kg_parallel.py` with LLM workers
+   when GPU is stable. Could take several days but adds full coverage.
+
+3. **What it unlocks in the chatbot:**
+   - "What are TSLA's key risk factors?" — direct answer from RiskFactor.summary
+   - "Which companies mention tariff risk?" — cross-company via RiskDriver name
+   - "What mitigations does Apple have for supply chain risk?" — Mitigation nodes
+   - All of Phase 4 chatbot features (cross-company risk comparison, trend analysis)
+
+**Priority:** Start Tier 1 once the NER noise cleanup is done (cleaner graph = better LLM outputs).
+
+---
+
+## Competitor NER Noise — Cleanup Plan
+
+**Problem:** 562,998 Competitor nodes, majority are false positives from spaCy tagging all
+ORG entities in filing text:
+- Regulatory bodies with thousands of mentions: "SEC" (4,479 companies), "GAAP" (3,074), "FASB" (2,519)
+- Boilerplate: "LLC" (3,242), "Board of Directors" (2,554), "General Counsel" (856)
+- Table/numeric garbage: "$ 106,578 Stock", "# of Loans Balance", "#REVOLVEaroundtheworld"
+- 477,137 singletons (85% of all nodes) — mentioned by exactly 1 company, useless for
+  cross-company analysis
+
+**Distribution:**
+| Mentioned by | Count | Notes |
+|---|---|---|
+| 1 company only | 477,137 | Almost all noise |
+| 2 companies | 38,915 | Mostly noise |
+| 3–9 companies | 33,855 | Mix — some real |
+| 10+ companies | 11,623 | Still has noise (SEC, LLC, GAAP top the list) |
+
+**Solution:** Two-pass cleanup in `python/clean_competitor_noise.py`:
+
+Pass 1 — Blocklist deletion (pattern-based, catches high-frequency false positives):
+  - Exact match: SEC, GAAP, FASB, ASC, ASU, IFRS, IRS, FINRA, NYSE, NASDAQ, LLC, UNRESOLVED, K, EU, etc.
+  - Phrase match: "Board of Directors", "General Counsel", "Securities and Exchange Commission",
+    "European Union", "European Commission", "Form S-3", "Off-Balance Sheet", COVID-19, etc.
+  - Regex: names starting with `$`, `#`, digit, or quote mark
+  - Very short: 1–2 character names
+
+Pass 2 — Singleton deletion (remove all remaining nodes mentioned by only 1 company):
+  - These can never contribute to cross-company analysis
+  - Removes ~477k nodes in one batch
+
+**Expected result:** ~562,998 → ~30,000–50,000 Competitor nodes (roughly 90% reduction),
+with remaining nodes being genuine company names mentioned by 2+ companies.
+
+**Implementation:** `python/clean_competitor_noise.py` — dry-run by default, `--execute` to apply.
+
+---
+
 ## Priority Order for Implementation
 
 | Priority | Bug/Improvement | Effort | Impact |

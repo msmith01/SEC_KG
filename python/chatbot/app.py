@@ -43,7 +43,9 @@ def load_pipeline(provider: str):
 # ── Session state ─────────────────────────────────────────────────────────────
 if "state" not in st.session_state:
     from chatbot.memory import ConversationState
-    st.session_state.state = ConversationState()
+    _state = ConversationState()
+    _state.load()
+    st.session_state.state = _state
 
 if "messages" not in st.session_state:
     st.session_state.messages = []   # [{role, content, cypher, sources}]
@@ -85,9 +87,11 @@ with st.sidebar:
     st.markdown(f"**Topic:** {s.active_topic or '—'}")
 
     if st.button("Clear context"):
-        from chatbot.memory import ConversationState
+        from chatbot.memory import ConversationState, SESSION_FILE
         st.session_state.state = ConversationState()
         st.session_state.messages = []
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
         st.rerun()
 
     st.divider()
@@ -193,7 +197,8 @@ if question:
 
                 # 5. Synthesise
                 answer = pipe["synthesiser"].answer(
-                    question, graph_facts, sem_text, state
+                    question, graph_facts, sem_text, state,
+                    primary_source=routing.get("primary_source", "graph"),
                 )
 
                 # 6. Update state
@@ -206,6 +211,7 @@ if question:
                     graph_rows=graph_rows,
                     semantic_hits=sem_hits,
                 ))
+                state.save()
 
                 # 7. Display
                 st.markdown(answer)

@@ -209,16 +209,16 @@ SYNTHESISER_TEMPLATE = """Question: {question}
 
 Active context: {context_summary}
 
---- GRAPH FACTS ---
-{graph_facts}
+Note: {source_note}
 
---- FILING EXCERPTS (semantic search) ---
-{semantic_hits}
+{primary_block}
+
+{secondary_block}
 
 --- CONVERSATION HISTORY ---
 {history}
 
 Answer the question using the facts above. Be specific — name companies, years, figures.
-If no relevant data was found in the graph, say so and describe what the graph does contain
-(use the overview facts if provided). Keep the answer under 300 words unless more detail is needed.
+If no relevant data was found, say so and describe what IS available (years, companies in graph).
+Keep the answer under 300 words unless more detail is needed.
 """

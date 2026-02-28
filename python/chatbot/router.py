@@ -70,6 +70,9 @@ class Router:
         # Fill blanks from conversation state
         routing = self._fill_from_context(routing, state)
 
+        # Decide whether graph or semantic search should be primary
+        routing["primary_source"] = self._detect_primary_source(routing, question)
+
         return routing
 
     def _parse_json(self, raw: str) -> dict:
@@ -147,6 +150,28 @@ class Router:
         except Exception:
             pass
         return None
+
+    def _detect_primary_source(self, routing: dict, question: str) -> str:
+        """Return 'semantic' for narrative/opinion/MD&A questions; 'graph' for structured queries."""
+        q = question.lower()
+        topic = (routing.get("topic") or "").lower()
+        semantic_signals = {
+            "mda", "md&a", "management discussion", "management opinion",
+            "outlook", "opinion", "narrative", "tone", "sentiment",
+            "what did management say", "what does management think",
+            "how did they describe", "what was said about",
+            "supply chain risk", "risk mention", "risk factor",
+        }
+        graph_signals = {
+            "competitor", "competes with", "geographic", "market", "country",
+            "metric", "revenue", "filing count", "how many", "which companies",
+            "list", "most common", "top ", "compare",
+        }
+        q_semantic = sum(1 for s in semantic_signals if s in q or s in topic)
+        q_graph    = sum(1 for s in graph_signals    if s in q or s in topic)
+        if q_semantic > q_graph:
+            return "semantic"
+        return "graph"
 
     def _fill_from_context(self, routing: dict, state: ConversationState) -> dict:
         """If router left company/years blank, use active context."""

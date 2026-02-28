@@ -23,12 +23,24 @@ class Synthesiser:
         graph_facts: str,
         semantic_hits: str,
         state: ConversationState,
+        primary_source: str = "graph",
     ) -> str:
+        # For narrative/MD&A questions, lead with filing excerpts
+        if primary_source == "semantic":
+            primary_block   = f"--- FILING EXCERPTS (primary source) ---\n{semantic_hits}"
+            secondary_block = f"--- GRAPH FACTS (supplementary) ---\n{graph_facts}"
+            source_note     = "Prioritise the filing excerpts for this answer. Graph data is supplementary."
+        else:
+            primary_block   = f"--- GRAPH FACTS ---\n{graph_facts}"
+            secondary_block = f"--- FILING EXCERPTS ---\n{semantic_hits}"
+            source_note     = "Prioritise graph facts. Use filing excerpts to add detail."
+
         prompt = SYNTHESISER_TEMPLATE.format(
             question=question,
             context_summary=state.context_summary(),
-            graph_facts=graph_facts,
-            semantic_hits=semantic_hits,
+            primary_block=primary_block,
+            secondary_block=secondary_block,
+            source_note=source_note,
             history=state.history_text(),
         )
         return self.llm.complete(
