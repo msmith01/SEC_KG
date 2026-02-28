@@ -111,20 +111,22 @@ class GraphQA:
 
         if cik:
             # Show what years this specific company has in the graph
-            years_rows = self._execute(
+            years_rows = self._execute_params(
                 "MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear) "
-                f"WHERE c.cik = '{cik}' "
+                "WHERE c.cik = $cik "
                 "RETURN c.name AS company, c.ticker AS ticker, "
-                "collect(DISTINCT fy.year) AS available_years"
+                "collect(DISTINCT fy.year) AS available_years",
+                {"cik": str(cik)},
             )
             if years_rows and not years_rows[0].get("error"):
                 return [{"_diagnostic": True, "_type": "available_years", **r} for r in years_rows]
         elif company:
-            years_rows = self._execute(
+            years_rows = self._execute_params(
                 "MATCH (c:Company)<-[:FILED_BY]-(f:Filing)-[:FILED_IN]->(fy:FiscalYear) "
-                f"WHERE toLower(c.name) CONTAINS toLower('{company}') "
+                "WHERE toLower(c.name) CONTAINS toLower($company) "
                 "RETURN c.name AS company, c.ticker AS ticker, "
-                "collect(DISTINCT fy.year) AS available_years"
+                "collect(DISTINCT fy.year) AS available_years",
+                {"company": company},
             )
             if years_rows and not years_rows[0].get("error"):
                 return [{"_diagnostic": True, "_type": "available_years", **r} for r in years_rows]
@@ -155,6 +157,14 @@ class GraphQA:
         try:
             with self.driver.session(database=config.NEO4J_DATABASE) as s:
                 result = s.run(cypher)
+                return [dict(r) for r in result][:50]
+        except Exception as e:
+            return [{"error": str(e)}]
+
+    def _execute_params(self, cypher: str, params: dict) -> list[dict]:
+        try:
+            with self.driver.session(database=config.NEO4J_DATABASE) as s:
+                result = s.run(cypher, **params)
                 return [dict(r) for r in result][:50]
         except Exception as e:
             return [{"error": str(e)}]

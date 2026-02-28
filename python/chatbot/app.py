@@ -48,7 +48,12 @@ if "state" not in st.session_state:
     st.session_state.state = _state
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []   # [{role, content, cypher, sources}]
+    # Restore visual history from loaded conversation turns
+    msgs = []
+    for t in st.session_state.state.turns:
+        msgs.append({"role": "user", "content": t.question})
+        msgs.append({"role": "assistant", "content": t.answer, "cypher": t.cypher, "sources": ""})
+    st.session_state.messages = msgs
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────

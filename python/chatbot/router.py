@@ -142,7 +142,7 @@ class Router:
                     "WHERE toLower(c.ticker) = toLower($term) "
                     "   OR toLower(c.name) CONTAINS toLower($term) "
                     "RETURN c.name AS name, c.cik AS cik "
-                    "ORDER BY c.name LIMIT 1",
+                    "ORDER BY size(c.name) LIMIT 1",
                     term=term
                 ))
                 if rows:
