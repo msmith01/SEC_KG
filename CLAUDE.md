@@ -221,6 +221,34 @@ Always follow this order to avoid overloading the machine:
 5. **Start chatbot** — only after GPU is verified; chatbot defaults to `ollama` provider
 6. **Start LLM workloads** — only when home to monitor GPU temps and fan speed
 
+### Next Session TODO (when home)
+
+```bash
+# 1. Check load
+uptime
+
+# 2. Reboot to clear GPU crash state
+sudo reboot
+
+# 3. After reboot — verify GPU
+nvidia-smi
+
+# 4. Start Neo4j
+docker start neo4j-sec
+
+# 5. Restart R collection (stops on reboot) — 8 workers total
+nohup bash run_parallel_collection.sh 2023 2 > logs/collection_2023_resume3.log 2>&1 &
+nohup bash run_parallel_collection.sh 2024 2 > logs/collection_2024_resume3.log 2>&1 &
+nohup bash run_all_years.sh 1993 2014 4 > logs/historical_collection3.log 2>&1 &
+
+# 6. Run 8K preprocessing on collected raw files
+python3 python/run_preprocessing_8k.py --year 2014 2015 2016
+
+# 7. If GPU healthy — start LLM-mode KG population (monitor fans)
+nohup python3 python/run_kg_population.py --section risk_factors > logs/kg_llm_risk_factors.log 2>&1 &
+watch -n 5 nvidia-smi
+```
+
 ### Cooling Down an Overloaded Machine
 
 If load average is high (check with `uptime`; target < number of cores):
