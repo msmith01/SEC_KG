@@ -75,6 +75,36 @@ EXACT_BLOCKLIST = {
     "CHAIRMAN", "DIRECTOR", "OFFICER", "COUNSEL",
     # Common OCR / parse garbage
     "MILEST1", "N1THELESS", "NONETHELESS", "HOWEVER",
+    # High-frequency false positives observed in graph data
+    # Regulatory / financial acronyms (not company names)
+    "ATM", "PPP", "GHG", "API", "IRB", "NOL", "OECD",
+    "NDA", "EC", "EMA", "IND", "LIBOR", "SOFR", "OTC",
+    "ETF", "REIT", "CDO", "CDS", "ABS", "MBS",
+    "MLA", "APR", "MAPR", "TILA", "ECOA", "EFTA", "UDAAP",
+    "FDCA", "NADA", "RFID", "EHR", "ICD", "NDS", "LPR",
+    "COMP", "KYC", "AML", "BSA", "DORA", "NIM", "ROC",
+    "HMDA", "ACH", "SWIFT", "IBAN",
+    "OPEC", "IASB", "IASC", "AIFMD", "UCITS",
+    "DSCR", "LTV", "DTI", "PMI", "HELOC",
+    "ESG", "TCFD", "SASB", "CSR",
+    "COGS", "WACC", "CAPM",
+    "MANAGEMENT'S",
+    # Round 2: observed in top-remaining noise
+    "SBA", "GCP", "ERP", "SAB", "REMS", "HITECH", "OFAC",
+    "TCJA", "DEFERRED", "HIPAA",
+    # Round 3
+    "VIE", "OEM", "IRA", "GMP", "OEM", "UNITS", "UNIT",
+    "RECOGNITION", "OMICRON", "OMICRON VARIANT",
+    # Generic single-word common nouns that spaCy labels ORG
+    "SEGMENTS", "SEGMENT", "DIVISION", "DIVISIONS",
+    "ASSETS", "LIABILITIES", "REVENUES", "EXPENSES",
+    "EMPLOYEES", "CUSTOMERS", "SUPPLIERS", "VENDORS",
+    "CONTRACTS", "AGREEMENTS", "STANDARDS", "GUIDELINES",
+    "REGULATIONS", "REQUIREMENTS", "PROCEDURES",
+    "PROPERTY", "EURO", "DOLLAR", "BANK",
+    "SECURITY", "PRIVACY", "PROTECTION",
+    "INFRASTRUCTURE", "PLATFORM", "NETWORK",
+    "DATA", "INFORMATION", "CONTENT", "MEDIA",
 }
 
 # Substring / phrase matches (case-insensitive)
@@ -153,6 +183,40 @@ PHRASE_BLOCKLIST = [
     "stock compensation",
     "stock-based compensation",
     "fair value",
+    # High-frequency patterns observed in graph
+    "management's",
+    "management discussion",
+    "regulation s-k", "regulation s-x", "regulation a",
+    "accounting standards",
+    "generally accepted",
+    "stock exchange",
+    "supplement", "supplementary data",
+    "controls and procedures",
+    "operations of the",
+    "branch operations",
+    "direct loan",
+    "greenhouse gas",
+    "net operating loss",
+    "the toronto stock", "the london stock", "the new york stock",
+    # Round 2: patterns from remaining top noise
+    "consolidated financial",
+    "intangibles",
+    "inter partes",
+    "qui tam",
+    "business conduct",
+    "good delivery",
+    "national association",
+    "loan servicing",
+    "deferred tax",
+    "staff accounting",
+    "risk evaluation",
+    # Round 3
+    "non-gaap",
+    "information technology",
+    "business combination",
+    "initial public offering",
+    "goodwill goodwill",
+    "good manufacturing",
 ]
 
 # Regex patterns matched against the full name
@@ -166,6 +230,20 @@ REGEX_BLOCKLIST = [
     re.compile(r'\.{3,}'),               # ellipsis-style truncation
     re.compile(r'^\s*$'),                 # blank or whitespace only
     re.compile(r'.{200,}'),              # absurdly long "names"
+    # Possessive of a common noun (e.g. "Management's", "Company's")
+    re.compile(r"^[A-Z][a-z]+'s$", re.IGNORECASE),
+    # "the [Something] Exchange/Commission/Authority/Board/Bureau/Agency"
+    re.compile(
+        r'^[Tt]he\s.*(exchange|commission|authority|bureau|authority|agency|board)$',
+        re.IGNORECASE,
+    ),
+    # Pure all-caps 2–3 chars that are clearly not company ticker/names
+    # (already handled via EXACT_BLOCKLIST, but catch any remainders)
+    re.compile(r'^[A-Z]{1,2}$'),          # 1 or 2 capital letters only
+    # OCR/parse garbage: word characters mixed with digits mid-word (e.g. postp1, standal1, teleph1)
+    re.compile(r'[a-z]\d[a-z]?$'),
+    # Names longer than 120 chars — almost certainly a document excerpt, not a company
+    re.compile(r'.{120,}', re.DOTALL),
 ]
 
 

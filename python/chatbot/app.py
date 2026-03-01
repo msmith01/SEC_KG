@@ -158,6 +158,10 @@ for msg in st.session_state.messages:
         if msg.get("sources"):
             with st.expander("Sources"):
                 st.markdown(msg["sources"])
+        if msg.get("graph_html"):
+            with st.expander("Graph view"):
+                import streamlit.components.v1 as components
+                components.html(msg["graph_html"], height=480, scrolling=False)
 
 
 # Input
@@ -234,11 +238,25 @@ if question:
                     with st.expander("Sources"):
                         st.markdown(sources_md)
 
+                # Graph panel — fetch subgraph and render pyvis
+                graph_html = None
+                try:
+                    from chatbot.graph_panel import fetch_subgraph, build_pyvis_html
+                    sg_nodes, sg_edges = fetch_subgraph(routing)
+                    graph_html = build_pyvis_html(sg_nodes, sg_edges)
+                except Exception:
+                    pass
+                if graph_html:
+                    with st.expander("Graph view", expanded=False):
+                        import streamlit.components.v1 as components
+                        components.html(graph_html, height=480, scrolling=False)
+
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer,
                     "cypher": cypher,
                     "sources": sources_md,
+                    "graph_html": graph_html,
                 })
 
             except Exception as e:
