@@ -187,6 +187,69 @@ python/kg_population/   — extractor.py (LLM) / ner_extractor.py (spaCy)
 
 **Neo4j ontology** (`python/ontology/`): `nodes.py` defines typed node classes (Company, Filing, Section, RiskFactor, RiskDriver, RiskConsequence, Mitigation, Product, Competitor, etc.); `relations.py` defines typed edges; `neo4j_schema.py` manages uniqueness constraints and graph write operations.
 
+## System Health — GPU, Load, and Ollama
+
+### GPU Crash Pattern
+
+The RTX 5090 GPU crashes periodically. When it does, Ollama automatically falls back to running the LLM on CPU. A 20.9B model on CPU consumes **2000%+ CPU** (most of the 24 cores), which overloads the machine and can trigger a cascade:
+
+```
+GPU driver crash → Ollama falls back to CPU → 20+ cores saturated
+→ system overheats/OOMs → GPU crashes again on next boot
+```
+
+**Check GPU status before starting any LLM work:**
+```bash
+nvidia-smi
+# If you see "Unknown Error" or "No devices found" — GPU is crashed, do NOT start Ollama workloads
+```
+
+**Check `size_vram` via Ollama API:**
+```bash
+curl -s http://localhost:11434/api/ps | python3 -m json.tool
+# size_vram: 0 means model is running on CPU — dangerous, will overload machine
+```
+
+### Safe Startup Order (after reboot)
+
+Always follow this order to avoid overloading the machine:
+
+1. **Reboot** — clears GPU driver crash state
+2. **Verify GPU**: `nvidia-smi` — must show the RTX 5090 cleanly before continuing
+3. **Start Neo4j**: `docker start neo4j-sec` — low footprint, safe any time
+4. **Start R collection** — network I/O bound, low CPU per worker; use ≤4 workers per year
+5. **Start chatbot** — only after GPU is verified; chatbot defaults to `ollama` provider
+6. **Start LLM workloads** — only when home to monitor GPU temps and fan speed
+
+### Cooling Down an Overloaded Machine
+
+If load average is high (check with `uptime`; target < number of cores):
+
+```bash
+# Check what's eating CPU
+ps aux --sort=-%cpu | head -20
+
+# Stop all R collection workers and orchestrators
+kill $(ps aux | grep -E "(run_parallel_collection|get_all_companies|run_all_years|get_8k)" | grep -v grep | awk '{print $2}')
+
+# Stop the chatbot
+kill $(ps aux | grep "streamlit run" | grep -v grep | awk '{print $2}')
+
+# Check if Ollama is running on CPU (size_vram: 0 is bad)
+curl -s http://localhost:11434/api/ps | python3 -m json.tool
+
+# Ollama will unload the model automatically after expires_at passes
+# Once unloaded, load drops immediately
+```
+
+### Chatbot LLM Provider Warning
+
+The chatbot sidebar defaults to `ollama`. Any question asked while Ollama is on CPU will trigger a slow CPU inference and spike load. If the GPU is not healthy, either:
+- Switch the provider dropdown to `anthropic` before asking anything
+- Or don't start the chatbot until GPU is verified
+
+---
+
 ## Key Data Flow Detail
 
 The R file header format (parsed by `preprocessing/pipeline.py`):
