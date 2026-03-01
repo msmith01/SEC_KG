@@ -21,6 +21,8 @@ EDGAR_MGMT_DISC_DIR     = BASE_DIR / "edgar_MgmtDisc"
 EDGAR_FILINGS_DIR       = BASE_DIR / "edgar_Filings"
 EDGAR_DAILY_CSV_DIR     = BASE_DIR / "edgar_DailyMasterCSVs"
 EDGAR_MASTER_INDEX_DIR  = BASE_DIR / "edgar_MasterIndex"
+EDGAR_8K_DIR            = BASE_DIR / "edgar_8K"
+EDGAR_8K_ITEMS_DIR      = BASE_DIR / "edgar_8K_items"
 
 TICKER_CIK_FILE         = BASE_DIR / "ticker_to_cik.csv"
 

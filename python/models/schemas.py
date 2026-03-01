@@ -24,6 +24,7 @@ class SectionType(str, Enum):
     BUSINESS     = "business"
     RISK_FACTORS = "risk_factors"
     MDA          = "mda"
+    EIGHT_K      = "8k"
 
 
 class FormType(str, Enum):

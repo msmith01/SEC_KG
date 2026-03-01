@@ -101,14 +101,14 @@ Last updated: **2026-02-27 14:30** (resumed after power cut)
 | O-7 | Checkpoint system (`.checkpoint.json`) | ✅ | 2026-02-19 | 2026-02-19 | Per-document; restarts skip already-done sections |
 | O-8 | Ollama retry / `keep_alive=-1` fix | ✅ | 2026-02-19 | 2026-02-19 | Exponential backoff; prevents VRAM eviction |
 | O-9 | **KG population (fast/spaCy) — full corpus** | ✅ | 2026-02-24 | 2026-02-28 | 56,076/56,076 docs. Graph: 1,981,766 ManagementOutlook, 1,704,457 FinancialMetric, 62,310 Competitor, 56,074 Section, 19,986 Filing, 12,637 GeographicMarket, 4,732 Company, 35 FiscalYear. |
-| O-10 | **LLM-mode KG re-population** | ⚠️ | — | — | Blocked: GPU driver crashes on CUDA workload (RTX 5090 bug re-surfaces on Ollama inference). API keys not configured. Needs: system reboot to recover GPU driver, then `python3 python/run_kg_population.py --section risk_factors`. |
+| O-10 | **LLM-mode KG re-population** | 📋 | — | — | GPU recovered (2026-03-01 reboot). Ready to run: `nohup python3 python/run_kg_population.py --section risk_factors > logs/kg_llm_risk_factors.log 2>&1 &`. Start when home to monitor. |
 | O-11 | **KG pipeline performance optimisation** | ✅ | 2026-02-24 | 2026-02-24 | 3-4x speedup: (1) `nlp.pipe(batch_size=64)` instead of per-sentence calls; (2) `write_document()` — single Neo4j session per doc; (3) edge `MERGE (a)-[r:TYPE]->(b)` without `filing_ref` in key — eliminates multigraph buildup; (4) checkpoint every 50 docs. Committed `2906cb5`. Graph wiped + restarted clean. |
 | O-12 | **KG OOM crash fix — lazy document loading** | ✅ | 2026-02-24 | 2026-02-24 | Old code loaded all 55,600 JSON docs into RAM at startup (~40 GB → OOM kill after ~4h). Fixed: one doc loaded per iteration, previous doc GC'd. Fast section_id scan reads only first 100 bytes per file (8x faster). Committed `7ff22f5`. |
 | O-13 | **KG throttle flag (`--delay`)** | ✅ | 2026-02-24 | 2026-02-24 | Added `--delay N` arg to `run_kg_population.py` — sleeps N seconds between docs; passes through to `pipeline.run_all()`. Current run uses `--delay 2`. |
 
 | C-1 | **Chatbot — Phase 1 (working skeleton)** | ✅ | 2026-02-25 | 2026-02-25 | Streamlit app at `http://192.168.1.39:8501`; files in `python/chatbot/`; router + graph QA (text-to-Cypher) + semantic QA (ChromaDB) + synthesiser + memory. |
 | C-2 | **Chatbot — Phase 2 (conversation quality)** | ✅ | 2026-02-28 | 2026-02-28 | Committed `2406fe7`. Fixes: (1) company name resolution uses `size(c.name)` ordering to prefer exact matches; (2) Cypher injection fixed with parameterized queries; (3) visual message history restored from session file on page reload. |
-| C-3 | **Chatbot — Phase 3 (UI + graph viz)** | 📋 | — | — | pyvis graph panel, context chips, export to markdown |
+| C-3 | **Chatbot — Phase 3 (UI + graph viz)** | ✅ | 2026-03-01 | 2026-03-01 | pyvis graph panel (`graph_panel.py`), export to markdown (sidebar download button), Pipeline Status page (`page_pipeline_status.py`). Commit `d0f83b1`. |
 | C-4 | **Chatbot — Phase 4 (cross-company + trend)** | 📋 | — | — | Needs LLM-mode RiskFactor nodes; trend queries, sector comparison |
 
 ---
@@ -121,10 +121,10 @@ Last updated: **2026-02-27 14:30** (resumed after power cut)
 | K-2 | `get_8k_items.R` — structured event extractor | ✅ | 2026-02-27 | 2026-02-27 | Uses `get8KItems()` to parse triggered event items (e.g. 1.01, 5.02); outputs `edgar_8K_items/<year>/events_<year>.csv`; batched (50 CIKs/call); resumable via checkpoint |
 | K-3 | `run_parallel_8k.sh` — two-pass parallel runner | ✅ | 2026-02-27 | 2026-02-27 | Pass 1 = raw download (parallel workers); Pass 2 = structured events (parallel workers); Pass 2 gated on Pass 1 success |
 | K-4 | `run_all_years_8k.sh` — multi-year orchestrator | ✅ | 2026-02-27 | 2026-02-27 | Runs years 2014–2024 in batches of 3 concurrent years × 4 workers; logs to `logs/8k_all_years.log` |
-| K-5 | **8-K collection 2014–2024** | 🔄 | 2026-02-27 | — | PID 20772 (restarted 2026-02-28); currently on batch 2014/2015/2016; log: `logs/8k_all_years.log`; monitor: `tail -f logs/8k_all_years.log`. Raw text in `edgar_8K/<year>/`. |
-| K-6 | **8-K KG integration (preprocessing)** | 📋 | — | — | Add 8-K pipeline stage: preprocess raw `edgar_8K/<year>/` text files through existing `preprocessing/` pipeline → `SectionDocument` JSON; needs new `section_type = "8k"` |
-| K-7 | **8-K KG integration (ontology)** | 📋 | — | — | New node types: `Event8K` (triggered item code + description), `MaterialAgreement`, `ExecutiveChange`, `EarningsGuidance` etc.; link to `Filing` and `Company` nodes |
-| K-8 | **8-K structured events → KG** | 📋 | — | — | Ingest `events_<year>.csv` directly: create `Event8K` nodes from item codes (no LLM needed); link `(Filing)-[:HAS_EVENT]->(Event8K)`. Fast, high-signal. |
+| K-5 | **8-K collection 2014–2024** | 🔄 | 2026-02-27 | — | 2014/2015/2016 raw done (~5K files each). 2017-2024 running (2 workers, 2 concurrent, log: `logs/8k_2017_2024.log`). Pass 2 (items) running for 2014-2016 (log: `logs/8k_items_2014_controller3.log`). |
+| K-6 | **8-K KG integration (preprocessing)** | ✅ | 2026-03-01 | 2026-03-01 | `preprocessing/pipeline_8k.py` + `run_preprocessing_8k.py`. Parses EDGAR SGML header, extracts HTML body, runs through existing cleaner/segmenter/tagger. `SectionType.EIGHT_K = "8k"` added to schemas. Output: `python/data/preprocessed/8k/`. Usage: `python3 python/run_preprocessing_8k.py --year 2023`. |
+| K-7 | **8-K KG integration (ontology)** | 📋 | — | — | New node types: `Event8K` (triggered item code + description), etc.; link to Filing and Company nodes |
+| K-8 | **8-K structured events → KG** | ✅ | 2026-03-01 | 2026-03-01 | `python/ingest_8k_events.py`: reads `edgar_8K_items/*/events_*.csv`, creates `Event8K` nodes + `(Company)-[:HAS_8K_EVENT]->` + `(Event8K)-[:FILED_IN]->(FiscalYear)`. Run: `python3 python/ingest_8k_events.py --apply-schema`. |
 | K-9 | **Cross-filing event timeline** | 📋 | — | — | Once K-7/K-8 done: Cypher queries to reconstruct event timelines per company (CEO changes, acquisitions, guidance cuts) across years |
 
 ---
@@ -136,7 +136,7 @@ Last updated: **2026-02-27 14:30** (resumed after power cut)
 | E-1 | **Cross-year semantic linking** | 📋 | — | — | `PERSISTED_TO`, `EMERGED_IN`, `RESOLVED_IN` edges between RiskFactor nodes across years; uses sentence embeddings to match |
 | E-2 | **Cross-section linking** | 📋 | — | — | Link entities appearing in multiple sections of the same filing (Item 1 ↔ 1A ↔ 7) |
 | E-3 | **Taxonomy layer** | 📋 | — | — | Hierarchical concept tree between Glossary and Ontology (e.g. Market Risk → Interest Rate Risk → Fixed Rate Exposure) |
-| E-4 | **Graph quality audit / NER noise cleanup** | 📋 | — | — | Cypher queries to flag false-positive Competitor/ORG nodes from spaCy; dedup pass |
+| E-4 | **Graph quality audit / NER noise cleanup** | ✅ | 2026-03-01 | 2026-03-01 | Competitor: 1,225 false-positives removed (62,310→61,085) via `clean_competitor_noise.py` (expanded blocklist). GeographicMarket: 1,694 nodes removed + 6 alias pairs merged (CA→California, U.S.→the United States, UK→UK, EU→EU) via `clean_geo_noise.py`. |
 
 ---
 
@@ -165,66 +165,55 @@ Last updated: **2026-02-27 14:30** (resumed after power cut)
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SESSION STATE: 2026-02-28 ~22:05
+SESSION STATE: 2026-03-01 ~15:00
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 WHAT IS RUNNING:
   neo4j-sec — Docker container up
-  Chatbot   — PID 10598, http://192.168.1.39:8501, log: logs/chatbot.log
-  R collection 2023 — PID 7796, log: logs/collection_2023_resume.log
-  R collection 2024 — PID 7851, log: logs/collection_2024_resume.log
-  8-K pipeline 2014–2024 — PID 20772, log: logs/8k_all_years.log (batch 2014/2015/2016)
-  Historical R collection 1993–2014 — PID 21438, log: logs/historical_collection.log
+  Chatbot   — running, http://192.168.1.39:8501, log: logs/chatbot.log
+  R collection 2023 — PID ~37891, log: logs/collection_2023_resume2.log
+  R collection 2024 — PID ~37892, log: logs/collection_2024_resume2.log
+  Historical R collection 1993–2014 — PID ~39907, log: logs/historical_collection2.log
+  8-K pipeline 2017–2024 — PID ~22886, log: logs/8k_2017_2024.log (pass1+2, 2 workers)
+  8-K items pass2 2014 — log: logs/8k_items_2014_controller3.log
+  8-K items pass2 2015 — log: logs/8k_items_2015_controller3.log
+  8-K items pass2 2016 — log: logs/8k_items_2016_controller3.log
 
-GPU STATUS: RTX 5090 driver crashed after Ollama inference attempt.
-  nvidia-smi returns "Unknown Error". Needs system reboot to recover.
-  This blocks LLM-mode KG population.
+GPU STATUS: Recovered (nvidia-smi working). RTX 5090 available for LLM inference.
 
-WHAT IS NOT RUNNING:
-  1. Glossary rebuild (run after R collection settles):
+WHAT IS NOT RUNNING (ready to start):
+  1. LLM-mode KG population (when home to monitor GPU temps):
+       nohup python3 python/run_kg_population.py --section risk_factors > logs/kg_llm_risk_factors.log 2>&1 &
+  2. 8-K preprocessing (after more raw files collected):
+       python3 python/run_preprocessing_8k.py
+  3. 8-K events ingestion (when CSVs appear in edgar_8K_items/):
+       python3 python/ingest_8k_events.py --apply-schema
+  4. Glossary rebuild (after collection settles):
        nohup python3 python/run_glossary.py --rules-only --index-chroma > logs/glossary_rebuild.log 2>&1 &
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-NEXT SESSION — STEP BY STEP
+NEXT SESSION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STEP 1 — Check running processes (5 min)
-  # Is Neo4j up?
+STEP 1 — Check running processes
   docker ps --filter name=neo4j-sec --format "{{.Status}}"
-  # If down: docker start neo4j-sec
-
-  # Is chatbot up?
   ps aux | grep streamlit | grep -v grep
-  # If down: nohup streamlit run python/chatbot/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true > logs/chatbot.log 2>&1 &
+  tail -3 logs/8k_2017_2024.log
+  tail -3 logs/historical_collection2.log
 
-  # Is R collection running?
-  ps aux | grep "run_parallel_collection\|run_smart_collection" | grep -v grep | wc -l
-  # Check historical: tail -5 logs/historical_collection.log
+STEP 2 — Start LLM-mode KG population (monitor GPU fans)
+  nohup python3 python/run_kg_population.py --section risk_factors > logs/kg_llm_risk_factors.log 2>&1 &
+  watch -n5 nvidia-smi   # in separate terminal
 
-STEP 2 — REBOOT to recover GPU (if not done already)
-  sudo reboot
-  After reboot: nvidia-smi should show normal output
-  Then verify Ollama: curl -s http://localhost:11434/api/tags
-
-STEP 3 — Start LLM-mode KG population (after GPU recovered)
-  This adds RiskFactor, RiskDriver, RiskConsequence, Mitigation nodes.
-  Run risk_factors section first (most valuable):
-    nohup python3 python/run_kg_population.py --section risk_factors > logs/kg_llm_risk_factors.log 2>&1 &
-  Monitor: tail -f logs/kg_llm_risk_factors.log
-
-STEP 4 — 8-K KG integration (when events CSVs appear in edgar_8K_items/)
-  Check: ls edgar_8K_items/
-  If populated: build K-6 (preprocessing) and K-8 (events → Neo4j nodes)
-
-STEP 5 — Chatbot Phase 3: graph visualisation panel
-  Add pyvis subgraph rendering to app.py.
-  After each answer, render a pyvis HTML component showing the subgraph of entities referenced.
+STEP 3 — When 8-K events CSVs populated
+  ls edgar_8K_items/
+  python3 python/ingest_8k_events.py --apply-schema
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BIGGER PICTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  1. LLM-mode KG population (O-10) — needs GPU, adds RiskFactor/RiskDriver/etc.
-  2. 8-K KG integration (K-6, K-7, K-8) — event timelines, executive changes, M&A
+  1. LLM-mode KG population (O-10) — adds RiskFactor/RiskDriver/etc.
+  2. 8-K KG integration complete (K-7 ontology still needed)
   3. Cross-year semantic linking (E-1) — PERSISTED_TO / EMERGED_IN edges
   4. Back up raw SEC documents to S3 / Google Drive
 ```

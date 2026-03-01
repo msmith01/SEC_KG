@@ -65,6 +65,7 @@ with st.sidebar:
         "Page",
         [
             "Chat",
+            "Pipeline Status",
             "Dataset Statistics",
             "Semantic Search",
             "Company Profile",
@@ -99,6 +100,28 @@ with st.sidebar:
             os.remove(SESSION_FILE)
         st.rerun()
 
+    # Export conversation to markdown
+    if st.session_state.get("messages"):
+        from datetime import datetime as _dt
+        def _build_markdown():
+            lines = [f"# SEC KG Chat export — {_dt.now().strftime('%Y-%m-%d %H:%M')}\n"]
+            for msg in st.session_state.messages:
+                role = "**You**" if msg["role"] == "user" else "**Assistant**"
+                lines.append(f"{role}\n\n{msg['content']}\n")
+                if msg.get("cypher"):
+                    lines.append(f"```cypher\n{msg['cypher']}\n```\n")
+                if msg.get("sources"):
+                    lines.append(f"*Sources:* {msg['sources']}\n")
+                lines.append("---\n")
+            return "\n".join(lines)
+
+        st.download_button(
+            label="Export to Markdown",
+            data=_build_markdown(),
+            file_name=f"sec_chat_{_dt.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown",
+        )
+
     st.divider()
     st.subheader("Example questions")
     examples = [
@@ -114,6 +137,11 @@ with st.sidebar:
 
 
 # ── Non-chat pages ────────────────────────────────────────────────────────────
+if page == "Pipeline Status":
+    from chatbot.page_pipeline_status import render_pipeline_status
+    render_pipeline_status()
+    st.stop()
+
 if page == "Dataset Statistics":
     from chatbot.stats_page import render_stats
     render_stats()
