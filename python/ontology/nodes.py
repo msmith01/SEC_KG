@@ -6,6 +6,7 @@ Sections:
   Business Description nodes
   Risk Factors nodes
   MD&A nodes
+  8-K Event nodes
 
 ID conventions (from design doc):
   Company          : {cik}
@@ -25,6 +26,7 @@ ID conventions (from design doc):
   Driver           : drv_{slug}
   MacroFactor      : macro_{slug}
   ManagementOutlook: {cik}_{accession}_outlook_{sequence:04d}
+  Event8K          : 8k_{cik}_{accession_slug}_{item_code_slug}
 """
 
 from __future__ import annotations
@@ -357,3 +359,55 @@ class ManagementOutlook(BaseModel):
     @classmethod
     def make_id(cls, cik: str, accession: str, seq: int) -> str:
         return f"{cik}_{accession}_outlook_{seq:04d}"
+
+
+# ── 8-K Event nodes ───────────────────────────────────────────────────────────
+
+class Event8KCategory(str, Enum):
+    MATERIAL_AGREEMENT     = "material_agreement"
+    AGREEMENT_TERMINATION  = "agreement_termination"
+    BANKRUPTCY             = "bankruptcy"
+    ASSET_ACQUISITION      = "asset_acquisition"
+    EARNINGS_RESULTS       = "earnings_results"
+    DIRECT_OBLIGATION      = "direct_obligation"
+    TRIGGERING_EVENTS      = "triggering_events"
+    ASSET_DISPOSAL         = "asset_disposal"
+    MATERIAL_IMPAIRMENT    = "material_impairment"
+    DELISTING              = "delisting"
+    UNREGISTERED_SALES     = "unregistered_sales"
+    AUDITOR_CHANGE         = "auditor_change"
+    NON_RELIANCE_FINANCIALS = "non_reliance_financials"
+    CHANGE_OF_CONTROL      = "change_of_control"
+    OFFICER_DIRECTOR_CHANGE = "officer_director_change"
+    CHARTER_AMENDMENT      = "charter_amendment"
+    SHAREHOLDER_RIGHTS     = "shareholder_rights"
+    COMPENSATION_PLAN      = "compensation_plan"
+    SHELL_COMPANY_CHANGE   = "shell_company_change"
+    SHAREHOLDER_VOTE       = "shareholder_vote"
+    DIRECTOR_COMPENSATION  = "director_compensation"
+    ATS_NOTIFICATION       = "ats_notification"
+    REGULATION_FD          = "regulation_fd"
+    OTHER_EVENTS           = "other_events"
+    FINANCIAL_STATEMENTS   = "financial_statements"
+    OTHER                  = "other"
+
+
+class Event8K(BaseModel):
+    """
+    A material event reported on SEC Form 8-K.
+    One node per (company, accession, item_code) tuple.
+    node_id: 8k_{cik}_{accession_slug}_{item_code_slug}
+    """
+    node_id:      str                          # 8k_{cik}_{accession_slug}_{item_code_slug}
+    cik:          str                          # → Company
+    accession:    str                          # accession number (raw)
+    item_code:    str                          # e.g. "1.01", "5.02"
+    category:     Event8KCategory = Event8KCategory.OTHER
+    filing_date:  Optional[date] = None
+    fiscal_year:  Optional[int] = None         # → FiscalYear
+
+    @classmethod
+    def make_id(cls, cik: str, accession: str, item_code: str) -> str:
+        acc_slug = re.sub(r"[^a-z0-9]", "_", accession.lower())[:30]
+        code_slug = item_code.replace(".", "_")
+        return f"8k_{cik}_{acc_slug}_{code_slug}"

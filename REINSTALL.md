@@ -141,6 +141,34 @@ Raw filings in `edgar_Filings/` are deleted after extraction to save disk space 
 
 ---
 
+## 7B. 8-K Collection (Optional — event data)
+
+Collects SEC 8-K filings (material events: CEO changes, acquisitions, guidance cuts, etc.) separately from the 10-K pipeline. Two passes per year.
+
+### Full run (2014–2024)
+
+```bash
+nohup bash run_all_years_8k.sh 2014 2024 2 2 >> logs/8k_all_years.log 2>&1 &
+```
+
+Arguments: `<start_year> <end_year> <workers_per_year> <concurrent_years>`
+
+### Single year
+
+```bash
+# Pass 1 — download raw 8-K text files to edgar_8K/<year>/
+bash run_parallel_8k.sh 2023 1 10021 docs
+
+# Pass 2 — extract structured event items to edgar_8K_items/<year>/
+bash run_parallel_8k.sh 2023 2 10021 items
+```
+
+Output directories:
+- `edgar_8K/<year>/` — raw 8-K filing text (EDGAR SGML format)
+- `edgar_8K_items/<year>/events_<year>.csv` — structured event items (item code, company, date)
+
+---
+
 ## 8. Python Pipeline
 
 Run the three stages in order. Each is resumable — re-running skips already-processed files.
@@ -154,6 +182,18 @@ python3 python/run_preprocessing.py
 ```
 
 Output: `python/data/preprocessed/{risk_factors,business,mda}/`
+
+### Stage 1B — 8-K Preprocessing (if 8-K collection was run)
+
+Parses raw EDGAR SGML 8-K files into `SectionDocument` JSON. Run after Step 7B.
+
+```bash
+python3 python/run_preprocessing_8k.py                  # all years
+python3 python/run_preprocessing_8k.py --year 2023      # single year
+python3 python/run_preprocessing_8k.py --dry-run        # count files only
+```
+
+Output: `python/data/preprocessed/8k/`
 
 ### Stage 2 — Glossary Extraction
 
@@ -183,6 +223,17 @@ python3 python/run_kg_population.py --fast --section mda
 ```
 
 Checkpoint file at `python/data/kg_export/.checkpoint.json` — delete it to force a full re-run.
+
+### Stage 4 — 8-K Events Ingestion (if 8-K collection was run)
+
+Reads `edgar_8K_items/*/events_*.csv` and writes `Event8K` nodes into Neo4j, linked to `Company` and `FiscalYear`.
+
+```bash
+python3 python/ingest_8k_events.py --apply-schema   # first run: create constraints
+python3 python/ingest_8k_events.py                  # subsequent runs
+python3 python/ingest_8k_events.py --dry-run        # preview without writing
+python3 python/ingest_8k_events.py --years 2023 2024  # specific years
+```
 
 ---
 
@@ -218,8 +269,14 @@ SEC_KG/
 │   └── ...
 ├── edgar_BusinDescr/        # extracted Item 1 text
 ├── edgar_MgmtDisc/          # extracted Item 7 text
+├── edgar_8K/                # raw 8-K SGML filing text, organised by year
+├── edgar_8K_items/          # structured 8-K event CSVs, organised by year
 ├── python/data/
 │   ├── preprocessed/        # SectionDocument JSON files
+│   │   ├── risk_factors/
+│   │   ├── business/
+│   │   ├── mda/
+│   │   └── 8k/
 │   ├── glossary/            # domain glossary JSON
 │   ├── chroma/              # ChromaDB vector store
 │   └── kg_export/           # KG population checkpoint
@@ -229,10 +286,13 @@ SEC_KG/
 
 ---
 
-## Estimated Scale (2015–2024, ~7,880 companies)
+## Estimated Scale (2015–2024, ~10,021 companies)
 
 | Stage | Input | Output | Time |
 |-------|-------|--------|------|
-| R collection | EDGAR | ~117,000 `.txt` files | ~13 hrs (4 workers) |
-| Preprocessing | `.txt` files | ~117,000 JSON files | ~3 hrs |
-| KG population (fast) | JSON files | millions of nodes/edges | ~8–12 hrs |
+| R 10-K collection | EDGAR | ~180,000 `.txt` files | ~2–4 days (4 workers/year) |
+| R 8-K collection | EDGAR | ~50,000 raw + CSVs per year | ~1–2 days/year (2 workers) |
+| 10-K preprocessing | `.txt` files | ~180,000 JSON files | ~4–6 hrs |
+| 8-K preprocessing | SGML `.txt` files | JSON per year | ~30 min/year |
+| KG population (fast) | JSON files | millions of nodes/edges | ~8–12 hrs (parallel) |
+| 8-K events ingestion | CSVs | Event8K nodes | ~5–10 min |
